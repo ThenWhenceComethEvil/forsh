@@ -1,0 +1,7 @@
+#!/bin/bash
+# FORTH in bash ... why do I do these things to myself.
+
+#function lex {:;}
+#function parse {:;}
+
+

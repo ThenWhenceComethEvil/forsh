@@ -1,0 +1,23 @@
+# vim: ft=text: tw=80
+
+The (in)direct threading model of FORTH may actually have a semi-equivalency in
+its bash version. Need to better understand how FORTH actually do... but some
+parallel may help with execution speed.
+
+Can maybe just have everything be a function call. They're not crazy spensive,
+relative to the time to reading the initial file. 200k/s (with variable
+arguments) isn't bad.
+
+May be a faster way.
+
+Things to avoid (in order):
+- file I/O
+- subshells
+
+Things to kinda avoid
+- eval
+
+Things to actively encourage using:
+- push/pop from index arrays
+- setting/unsetting associative arrays
+
