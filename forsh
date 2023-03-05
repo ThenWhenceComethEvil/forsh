@@ -1,7 +1,137 @@
 #!/bin/bash
 # FORTH in bash ... why do I do these things to myself.
 
-#function lex {:;}
-#function parse {:;}
+#===============================================================================
+#                                    NOTES
+#-------------------------------------------------------------------------------
+# Trying different approach. Words are defined as a sequence of strings (mostly)
+# in a global array, MEMORY[].
+#
+# Currently a word is defined like so:
+#> MEMORY=(
+#>    ...
+#>    int: index of prior word,
+#>    str: name of word,
+#>    bin: flags (1: immediate, 2: hidden)
+#>    str: codeword
+#
+#>    int: index of def1 codeword
+#>    int: index of defN codeword
+#>    ...
+#> )
+#
+# This is a closer parallel to how the assembler version works.
+#
+#-------------------------------------------------------------------------------
+declare -gA CACHE=()       # { word -> index }
+declare -gA RCACHE=()      # { index -> word } Useful when debugging to print
+                           #                    the name occuring at an index.
+declare -ga MEMORY=()
+declare -g  WORD=          # Index of start of current word
+
+declare -ga STACK=()
+declare -ga RSTACK=()
+
+#                                  constants
+#-------------------------------------------------------------------------------
+                           # Index of the word's...
+declare -gi _INTR=0        #  interpreter function
+declare -gi _FLAG=1        #  flag(s)
+declare -gi _DEFN=2        #  beginning of definition word(s)
+
+                           # Flag constants
+declare -gi _IMED=2#001    #  immediate
+declare -gi _HIDE=2#010    #  hidden from `FIND`
+
+#
+#-------------------------------------------------------------------------------
+function word_new {
+   _WORD="${1,,}"
+
+   HEAD="${#MEMORY[@]}"
+   MEMORY+=( "$_WORD"  "$2" )
+
+   CACHE["$_WORD"]="$HEAD"
+   RCACHE["$HEAD"]="$_WORD"
+}
+
+#                              native bash words
+#-------------------------------------------------------------------------------
+function code_KEY {
+   read -N1 -r char
+
+   # Catch either the end of input, or ctrl+D. Is this portable?
+   if [[ ! "$char" || "$char" == $'\004' ]] ; then
+      exit 0
+   fi
+
+   # TODO(profiling): Is making this lower-case a problem? How much does it add
+   # to reading the stdlib?
+   STACK+=( "${char,}" )
+}
+word_new  KEY  code_KEY
 
 
+function code_WORD {
+   WORD_TEXT=''
+
+   while :; do
+      code_KEY
+      if [[ "${STACK[-1]}" =~ [[:space:]] ]] ; then
+         unset 'STACK[-1]'
+      else
+         break
+      fi
+   done
+
+   while :; do
+      if [[ ! "${STACK[-1]}" =~ [[:space:]] ]] ; then
+         WORD_TEXT+="${STACK[-1]}"
+         unset 'STACK[-1]'
+      else
+         break
+      fi
+      code_KEY
+   done
+}
+word_new  WORD  code_WORD
+
+
+function code_NUMBER {
+   if [[ "$WORD_TEXT" =~ (\-?[[:digit:]]+[[:digit:]_]*) ]] ; then
+      STACK+=( "${WORD_TEXT//_}"  1 )
+   else
+      STACK+=( "${WORD_TEXT}"  0 )
+   fi
+}
+word_new  NUMBER  code_NUMBER
+
+
+function code_FIND {
+   WORD="${CACHE[$WORD_TEXT]}" 
+   [[ "$WORD" ]] || return 1
+}
+word_new  FIND  code_FIND
+
+
+function code_QUIT {
+   RSTACK=()
+   while :; do
+      code_INTERPRET
+   done
+}
+word_new  QUIT  code_QUIT
+
+
+function code_INTERPRET {
+   code_WORD ; code_FIND || code_NUMBER
+}
+word_new  INTERPRET  code_INTERPRET
+
+
+function code_BYE { exit 0 ;}
+word_new  BYE  code_BYE
+
+#                                    engage
+#-------------------------------------------------------------------------------
+code_QUIT
