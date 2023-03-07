@@ -2,61 +2,285 @@
 # FORTH in bash ... why do I do these things to myself.
 
 #===============================================================================
-#                                    NOTES
+#                                   THINKIES
 #-------------------------------------------------------------------------------
-# Trying different approach. Words are defined as a sequence of strings (mostly)
-# in a global array, MEMORY[].
+# Global array MEMORY[] holds contiguous blocks of elements representing word
+# definitions. Word definitions look like this:
 #
-# Currently a word is defined like so:
-#> MEMORY=(
-#>    ...
-#>    int: index of prior word,
-#>    str: name of word,
-#>    bin: flags (1: immediate, 2: hidden)
-#>    str: codeword
+#  [
+#     'code_EXIT',   idx: 0, native codeword
+#     2#000,         idx: 1, no flags
+#     'code_plus',   idx: 2, native codeword
+#     2#000,         idx: 3, no flags
+#     'code_DUP',    idx: 4, native codeword
+#     2#000,         idx: 5, no flags
+#     'DOCOL',       idx: 6, start of  : DOUBLE DUP + ;
+#     2#000,         idx: 7, no flags
+#     4,             idx: 8, pointer to `DUP` codeword
+#     2,             idx: 9, pointer to `+` codeword
+#     0,             idx: 9, pointer to `+` codeword
+#  ]
 #
-#>    int: index of def1 codeword
-#>    int: index of defN codeword
-#>    ...
-#> )
+#  idx 0-1  defines `EXIT`
+#  idx 2-3  defines `+`
+#  idx 4-5  defines `DUP`
+#  idx 6-10 defines `: DOUBLE DUP + ;`
 #
-# This is a closer parallel to how the assembler version works.
+#  Use of DOUBLE resolves to its index
+#  { 6 }
+#  Calling the memory addr. at this index is DOCOL. Set equal to IDX+2
+#  { 4 }
+#  Calling memory addr. Does DUP. DUP ends with a call to NEXT.
+#  { 2 }
+#  Calling memory addr. Does PLUS. PLUS ends with call to NEXT.
+#  { 
+#
+#
+# This isn't quite right. Need to think it through more. Maybe some pen & paper
+# journaling. Need to decide if we're calling the index, or calling the function
+# represented by the index.
+#
+# In which case NEXT is going to need to increment and push the new address.
+#  Call @ address: ${MEMORY[RSTACK[-1]}
+#
+#-------------------------------------------------------------------------------
+# Aight, having trouble with when the address in the RSTACK should be resolved
+# to its location in memory.
+#
+# The RSTACK holds the address of the next function to call. Should always be
+# running:
+# >  while :; do
+# >     ${M[RS[-1]]}
+# >  done
+#
+# So DOCOL needs to push the address at ${M[RS[-1] + 2]}.
+#
+#-------------------------------------------------------------------------------
+# Looking at JONESFORTH again...
+#
+# Assuming no flags, for simplicity.
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'QUAD'         | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# His NEXT:
+#  There is a pointer to the NEXT instruction to execute (%esi).
+#  1. It saves the current index pointer (%esi)
+#  2. Increments %esi by 1
+#  3. Jumps to the address at that location
+#   
+#  For my purposes, I'm swapping out %esi & %eax with the return stack. Whatever
+#  is at the top gets executed. Unless maybe make a var that holds the current
+#  index in memory to execute? That feels more dirty. Though less pushing &
+#  popping for sure.
+#
+#  I think I can represent this as:
+#  >  function NEXT {
+#  >     RS+=( ${MEMORY[RS[-1]++]} )
+#  >  }
+#
+#  It will increment the counter by 1, and push the address referenced by the
+#  existing pointer.
+#
+#
+# His DOCOL:
+#  1. Pushes next instruction to run onto the return stack (RS[])
+#  2. Set current execute to the first word of the definition
+#  3. call NEXT
+#
+# Seems to just be responsible for shifting the IP past the header information
+# really. Wonder if mine can just be
+#  >  (( RS[-1] = RS[-1] + 2 ))
+#  >  NEXT
+#
+#
+# Pasting again to work through this given our new definitions:
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'DOCOL'        | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# I'm getting a little lost here. Trying again without the second level of
+# indirection of QUAD -> DOUBLE. Starting directly from DOUBLE.
+#
+#  WORD -> "DOUBLE" -> FIND
+#  IP=3 ; PS={}
+#
+#  EXECUTE $IP
+#  DOCOL pushes (( IP + _OFFSET )) to PS
+#  IP=3 ; PS={ 4 }
+#
+#  NEXT resolves PS[-1] and sets IP
+#  IP=2 ; PS={ 4 }
+#       and increments the top of the return stack
+#  IP=2 ; PS={ 5 }
+#
+#  EXECUTE $IP, f_DUP ends with a...
+#
+#  NEXT resolves PS[-1] and sets IP
+#  IP=1 ; PS={ 5 }
+#       and increments the top of the return stack
+#  IP=1 ; PS={ 6 }
+#
+#  EXECUTE $IP, f_plus, ends with a...
+#
+#  NEXT resolves PS[-1] and sets IP
+#  IP=0 ; PS={ 6 }
+#       and increments the top of the return stack
+#  IP=0 ; PS={ 7 }
+#
+#  EXECUTE $IP, EXIT    ???
+#  Drops PS[-1]         ???
+#
+#
+# EXIT needs to pop the return stack, and stick it onto the IP?
+#
+#
+# Again, but with another level of indirection.
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'DOCOL'        | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# IP=7   ;  PS={ }         DOCOL
+# IP=7   ;  PS={  8 }      NEXT
+# IP=3   ;  PS={  9 }      DOCOL
+# IP=3   ;  PS={  9,  4 }  NEXT
+# IP=2   ;  PS={  9,  5 }  f_DUP  ; NEXT
+# IP=1   ;  PS={  9,  6 }  f_plus ; NEXT
+# IP=0   ;  PS={  9,  7 }  f_EXIT ; NEXT
+#
+# Next does a pop, then the NEXT
+# IP=0   ;  PS={  9 }      pop
+# IP=3   ;  PS={ 10 }      NEXT
+#
+#  >  function DOCOL {
+#  >     PS+=( $(( IP + _FLAG )) )
+#  >     NEXT
+#  >  }
+#  >  function NEXT {
+#  >     IP="${M[PS[-1]++]}"
+#  >  }
+#
+#
+#-------------------------------------------------------------------------------
+# TODO:
+# Wondering if `read` should operate linewise. Make a little text buffer that
+# it throws things into. `KEY` actually pulls each character from that. Would
+# make it so nothing is evaluated on the CLI until user actually hits <CR>. Can
+# maybe put into the functionality of `KEY`. Start with a global buffer (empty
+# string).  If non-empty, push the next character to PS[]. If empty, read
+# another line from input, THEN push a char to the stack.
 #
 #-------------------------------------------------------------------------------
 declare -gA CACHE=()       # { word -> index }
 declare -gA RCACHE=()      # { index -> word } Useful when debugging to print
                            #                    the name occuring at an index.
-declare -ga MEMORY=()
+
+declare -ga M=()           # Memory.
 declare -g  WORD=          # Index of start of current word
 
-declare -ga STACK=()
-declare -ga RSTACK=()
+declare -gi IP=            # Instruction pointer
+declare -ga PS=()          # Parameter stack. Values.
+declare -ga RS=()          # Return stack. Address pointers.
 
 #                                  constants
 #-------------------------------------------------------------------------------
                            # Index of the word's...
 declare -gi _INTR=0        #  interpreter function
 declare -gi _FLAG=1        #  flag(s)
-declare -gi _DEFN=2        #  beginning of definition word(s)
+declare -gi _DEFS=2        #  beginning of definition word(s)
 
                            # Flag constants
-declare -gi _IMED=2#001    #  immediate
-declare -gi _HIDE=2#010    #  hidden from `FIND`
+declare -gi _IMED=1        #  immediate
+declare -gi _HIDE=2        #  hidden from `FIND`
 
 #
 #-------------------------------------------------------------------------------
+# @arg   $1    :str     Word name
+# @arg   $2    :fn      Interpreter function
+# @arg   $3    :binary  Binary flag [2#001, 2#010]
 function word_new {
-   _WORD="${1,,}"
+   HEAD="${#M[@]}"
+   M+=( "$2"  "${3:-0}" )
 
-   HEAD="${#MEMORY[@]}"
-   MEMORY+=( "$_WORD"  "$2" )
+   CACHE["$1"]="$HEAD"
+   RCACHE["$HEAD"]="$1"
+}
 
-   CACHE["$_WORD"]="$HEAD"
-   RCACHE["$HEAD"]="$_WORD"
+
+function EXIT {
+   unset 'RS[-1]'
+}
+
+function DOCOL {
+   PS+=( $(( IP + _FLAG )) )
+   NEXT
+}
+
+
+function NEXT {
+   IP="${M[PS[-1]++]}"
 }
 
 #                              native bash words
 #-------------------------------------------------------------------------------
+function code_QUIT {
+   RS=( 0 )  #<-- load pointer to the first defined word... this one!
+   while (( ${#RSTACK[@]} )) ; do
+      code_INTERPRET
+   done
+}
+word_new  QUIT  code_QUIT
+
+
+function code_INTERPRET {
+   code_backslash
+   code_WORD
+
+   # TODO: support for literals & numbers.
+   if ! code_FIND ; then
+      echo "no: $WORD_TEXT"
+      exit 1
+   fi
+
+   ${M[RS[-1]]}
+}
+word_new  INTERPRET  code_INTERPRET
+
+
+function code_BYE { exit 0 ;}
+word_new  BYE  code_BYE
+
+
 function code_KEY {
    read -N1 -r char
 
@@ -65,11 +289,28 @@ function code_KEY {
       exit 0
    fi
 
-   # TODO(profiling): Is making this lower-case a problem? How much does it add
-   # to reading the stdlib?
-   STACK+=( "${char,}" )
+   PS+=( "$char" )
 }
 word_new  KEY  code_KEY
+
+
+function code_backslash {
+   while :; do
+      code_KEY
+      if [[ "${PS[-1]}" =~ [[:space:]] ]] ; then
+         unset 'PS[-1]'
+      else
+         break
+      fi
+   done
+
+   until [[ "${PS[-1]}" == $'\n' ]] ; do
+      unset 'PS[-1]'
+      code_KEY
+   done
+   unset 'PS[-1]'
+}
+word_new  '\'  code_backslash
 
 
 function code_WORD {
@@ -77,17 +318,17 @@ function code_WORD {
 
    while :; do
       code_KEY
-      if [[ "${STACK[-1]}" =~ [[:space:]] ]] ; then
-         unset 'STACK[-1]'
+      if [[ "${PS[-1]}" =~ [[:space:]] ]] ; then
+         unset 'PS[-1]'
       else
          break
       fi
    done
 
    while :; do
-      if [[ ! "${STACK[-1]}" =~ [[:space:]] ]] ; then
-         WORD_TEXT+="${STACK[-1]}"
-         unset 'STACK[-1]'
+      if [[ ! "${PS[-1]}" =~ [[:space:]] ]] ; then
+         WORD_TEXT+="${PS[-1]}"
+         unset 'PS[-1]'
       else
          break
       fi
@@ -99,38 +340,19 @@ word_new  WORD  code_WORD
 
 function code_NUMBER {
    if [[ "$WORD_TEXT" =~ (\-?[[:digit:]]+[[:digit:]_]*) ]] ; then
-      STACK+=( "${WORD_TEXT//_}"  1 )
+      PS+=( "${WORD_TEXT//_}"  1 )
    else
-      STACK+=( "${WORD_TEXT}"  0 )
+      PS+=( "${WORD_TEXT}"  0 )
    fi
 }
 word_new  NUMBER  code_NUMBER
 
 
 function code_FIND {
-   WORD="${CACHE[$WORD_TEXT]}" 
-   [[ "$WORD" ]] || return 1
+   WORD="${CACHE[$WORD_TEXT]}"
+   [[ "$WORD" ]] && RS+=( "$WORD" )
 }
 word_new  FIND  code_FIND
-
-
-function code_QUIT {
-   RSTACK=()
-   while :; do
-      code_INTERPRET
-   done
-}
-word_new  QUIT  code_QUIT
-
-
-function code_INTERPRET {
-   code_WORD ; code_FIND || code_NUMBER
-}
-word_new  INTERPRET  code_INTERPRET
-
-
-function code_BYE { exit 0 ;}
-word_new  BYE  code_BYE
 
 #                                    engage
 #-------------------------------------------------------------------------------
