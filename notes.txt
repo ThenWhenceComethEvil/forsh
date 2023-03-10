@@ -1,23 +1,312 @@
-# vim: ft=text: tw=80
+# vim: ft=sh: tw=80
 
-The (in)direct threading model of FORTH may actually have a semi-equivalency in
-its bash version. Need to better understand how FORTH actually do... but some
-parallel may help with execution speed.
+# The (in)direct threading model of FORTH may actually have a semi-equivalency
+# in its bash version. Need to better understand how FORTH actually do... but
+# some parallel may help with execution speed.
+# 
+# Can maybe just have everything be a function call. They're not crazy spensive,
+# relative to the time to reading the initial file. 200k/s (with variable
+# arguments) isn't bad.
+# 
+# May be a faster way.
+# 
+# Things to avoid (in order):
+# - file I/O
+# - subshells
+# 
+# Things to kinda avoid
+# - eval
+# 
+# Things to actively encourage using:
+# - push/pop from index arrays
+# - setting/unsetting associative arrays
 
-Can maybe just have everything be a function call. They're not crazy spensive,
-relative to the time to reading the initial file. 200k/s (with variable
-arguments) isn't bad.
 
-May be a faster way.
-
-Things to avoid (in order):
-- file I/O
-- subshells
-
-Things to kinda avoid
-- eval
-
-Things to actively encourage using:
-- push/pop from index arrays
-- setting/unsetting associative arrays
-
+#===============================================================================
+#                                   THINKIES
+#-------------------------------------------------------------------------------
+# Global array MEMORY[] holds contiguous blocks of elements representing word
+# definitions. Word definitions look like this:
+#
+#  [
+#     'code_EXIT',   idx: 0, native codeword
+#     2#000,         idx: 1, no flags
+#     'code_plus',   idx: 2, native codeword
+#     2#000,         idx: 3, no flags
+#     'code_DUP',    idx: 4, native codeword
+#     2#000,         idx: 5, no flags
+#     'DOCOL',       idx: 6, start of  : DOUBLE DUP + ;
+#     2#000,         idx: 7, no flags
+#     4,             idx: 8, pointer to `DUP` codeword
+#     2,             idx: 9, pointer to `+` codeword
+#     0,             idx: 9, pointer to `+` codeword
+#  ]
+#
+#  idx 0-1  defines `EXIT`
+#  idx 2-3  defines `+`
+#  idx 4-5  defines `DUP`
+#  idx 6-10 defines `: DOUBLE DUP + ;`
+#
+#  Use of DOUBLE resolves to its index
+#  { 6 }
+#  Calling the memory addr. at this index is DOCOL. Set equal to IDX+2
+#  { 4 }
+#  Calling memory addr. Does DUP. DUP ends with a call to NEXT.
+#  { 2 }
+#  Calling memory addr. Does PLUS. PLUS ends with call to NEXT.
+#  { 
+#
+#
+# This isn't quite right. Need to think it through more. Maybe some pen & paper
+# journaling. Need to decide if we're calling the index, or calling the function
+# represented by the index.
+#
+# In which case NEXT is going to need to increment and push the new address.
+#  Call @ address: ${MEMORY[RSTACK[-1]}
+#
+#-------------------------------------------------------------------------------
+# Aight, having trouble with when the address in the RSTACK should be resolved
+# to its location in memory.
+#
+# The RSTACK holds the address of the next function to call. Should always be
+# running:
+# >  while :; do
+# >     ${M[RS[-1]]}
+# >  done
+#
+# So DOCOL needs to push the address at ${M[RS[-1] + 2]}.
+#
+#-------------------------------------------------------------------------------
+# Looking at JONESFORTH again...
+#
+# Assuming no flags, for simplicity.
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'QUAD'         | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# His NEXT:
+#  There is a pointer to the NEXT instruction to execute (%esi).
+#  1. It saves the current index pointer (%esi)
+#  2. Increments %esi by 1
+#  3. Jumps to the address at that location
+#   
+#  For my purposes, I'm swapping out %esi & %eax with the return stack. Whatever
+#  is at the top gets executed. Unless maybe make a var that holds the current
+#  index in memory to execute? That feels more dirty. Though less pushing &
+#  popping for sure.
+#
+#  I think I can represent this as:
+#  >  function NEXT {
+#  >     RS+=( ${MEMORY[RS[-1]++]} )
+#  >  }
+#
+#  It will increment the counter by 1, and push the address referenced by the
+#  existing pointer.
+#
+#
+# His DOCOL:
+#  1. Pushes next instruction to run onto the return stack (RS[])
+#  2. Set current execute to the first word of the definition
+#  3. call NEXT
+#
+# Seems to just be responsible for shifting the IP past the header information
+# really. Wonder if mine can just be
+#  >  (( RS[-1] = RS[-1] + 2 ))
+#  >  NEXT
+#
+#
+# Pasting again to work through this given our new definitions:
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'DOCOL'        | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# I'm getting a little lost here. Trying again without the second level of
+# indirection of QUAD -> DOUBLE. Starting directly from DOUBLE.
+#
+#  WORD -> "DOUBLE" -> FIND
+#  IP=3 ; RS={}
+#
+#  EXECUTE $IP
+#  DOCOL pushes (( IP + _OFFSET )) to RS
+#  IP=3 ; RS={ 4 }
+#
+#  NEXT resolves RS[-1] and sets IP
+#  IP=2 ; RS={ 4 }
+#       and increments the top of the return stack
+#  IP=2 ; RS={ 5 }
+#
+#  EXECUTE $IP, f_DUP ends with a...
+#
+#  NEXT resolves RS[-1] and sets IP
+#  IP=1 ; RS={ 5 }
+#       and increments the top of the return stack
+#  IP=1 ; RS={ 6 }
+#
+#  EXECUTE $IP, f_plus, ends with a...
+#
+#  NEXT resolves RS[-1] and sets IP
+#  IP=0 ; RS={ 6 }
+#       and increments the top of the return stack
+#  IP=0 ; RS={ 7 }
+#
+#  EXECUTE $IP, EXIT    ???
+#  Drops RS[-1]         ???
+#
+#
+# EXIT needs to pop the return stack, and stick it onto the IP?
+#
+#
+# Again, but with another level of indirection.
+# [
+#     'f_EXIT',      | 0
+#     'f_plus',      | 1
+#     'f_DUP',       | 2
+#     'DOCOL',       | 3      : DOUBLE DUP + ;
+#     2,             | 4         addr of DUP
+#     1,             | 5         addr of '+'
+#     0,             | 6         addr of ';' (EXIT)
+#     'DOCOL'        | 7      : QUAD DOUBLE DOUBLE ;
+#     3,             | 8         addr of DOUBLE
+#     3,             | 9         addr of DOUBLE
+#     0,             | 10        addr of ';' (EXIT)
+# ]
+#
+# IP=7   ;  RS={ }         DOCOL
+# IP=7   ;  RS={  8 }      NEXT
+# IP=3   ;  RS={  9 }      DOCOL
+# IP=3   ;  RS={  9,  4 }  NEXT
+# IP=2   ;  RS={  9,  5 }  f_DUP  ; NEXT
+# IP=1   ;  RS={  9,  6 }  f_plus ; NEXT
+# IP=0   ;  RS={  9,  7 }  f_EXIT ; NEXT
+#
+# Next does a pop, then the NEXT
+# IP=0   ;  RS={  9 }      pop
+# IP=3   ;  RS={ 10 }      NEXT
+#
+#  >  function DOCOL {
+#  >     RS+=( $(( IP + _FLAG )) )
+#  >     NEXT
+#  >  }
+#  >  function NEXT {
+#  >     IP="${M[RS[-1]++]}"
+#  >  }
+#
+#-------------------------------------------------------------------------------
+# Don't fully understand the `defcode` vs `defword` from jonesforth. Is next on
+# the reading list. Make list of which words call NEXT, EXIT, or neither. What
+# are just internal functions/macros (like NEXT), and which are actually
+# callable FORTH words?
+#
+#  QUIT        ln.2083
+#     defword
+#     no EXIT/NEXT
+#     > clears return stack
+#     > runs INTERPRET
+#     > loops
+#        > does the loop reset the return stack every time?
+#        > or just when QUIT is called initially
+#
+#  INTERPRET   ln.2092
+#     defcode
+#     ends in NEXT
+#     > calls _WORD function directly
+#     > jump to pointer at *(%eax)
+#        > or for our purposes: "${M[IP]}"
+#
+#
+# Aha. There are times that jonesforth is calling the underlying words WITHOUT
+# the terminal NEXT. Example, in INTERPRET, the function body of WORD is called
+# directly as _WORD (ln.1372).
+# Should maybe make a `code_` version (which will likely become `_f_`, which
+# calls the underlying function. Allows for any before/after actions when it's
+# actually being used as a word. Though that does make things two function calls
+# slower for every word. Probably better than making two different functions.
+#
+# Which things call an _under version of themselves:
+#  KEY      <--   defcode
+#  WORD     <--   defcode
+#  EMIT     <--   defcode
+#  NUMBER   <--   defcode
+#  FIND     <--   defcode
+#  TCFA     <--   defcode
+#
+# Pretty good amount of `defcode`s
+#
+# Speaking of which:
+#  defword:
+#     defining a real FORTH word
+#     begins with DOCOL
+#     then a sequence of pointers to the subsequent words of the definition
+#     ends with EXIT
+#  defcode:
+#     defining a BASH native word `code_*`
+#     ends with NEXT
+#  defvar:
+#     unnecessary
+#     we can define variables freely through the magic of bash
+#
+#
+# What does `defcode` does:
+#  creates a global `name_$LABEL` pointing to the top of the word definition (at
+#  the [link] prop)
+#  has header information that I'm skipping (link, str. name, flags, padding)
+#  creates global `$NAME` pointing to the DOCOL
+#  more stuff follows
+#
+#-------------------------------------------------------------------------------
+# Abbreviated form of KEY, WORD,
+#
+# KEY
+#     call _KEY
+#     pushes from %eax to stack
+#     NEXT
+# _KEY
+#     read char from stdin
+#     puts it into %eax (but not pushes)
+#
+#
+# WORD
+#     call _WORD
+#     pushes string buffer to stack
+#     NEXT
+# _WORD
+#     call _KEY
+#     skip comments
+#     skip whitespace
+#     jmp _WORD
+#     store chars in buffer
+#
+#-------------------------------------------------------------------------------
+# Seems like any time a word is directly calling another, it cannot call NEXT.
+# I.e., when `code_KEY` occurs within `code_INTERPRET`, cannot call the terminal
+# NEXT.
+#
+# NEXT needs to call the subsequent instruction. This may remove the need for
+# an IP var.
+#
+#-------------------------------------------------------------------------------
+# Currently when reading from stdin there's no way to "break into" a file with
+# `QUIT`, which I'm pretty sure is supposed to work. If you've redirected from
+# stdin, it's just still reading from there. Hmm.
+#
+#

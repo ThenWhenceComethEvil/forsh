@@ -1,3 +1,2 @@
-\ vim: ft=forth
 
-
+WORD
