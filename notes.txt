@@ -1,135 +1,86 @@
-# vim: ft=sh: tw=80
+# vim: ft=text: tw=80
 #===============================================================================
 #                                   THINKIES
 #-------------------------------------------------------------------------------
 
+Still don't like any solutions. Gotta start from real basics.
+
+MEMORY can contain (so far)
+   - function names
+   - addresses in memory to function names
+   - parameters to functions (e.g., BRANCH)
+
+Things I know:
+   (1)   Function addresses always point directly to function names.
+
+         Given an address, can always call the function at `MEMORY[MEMORY[SP]]`.
+         AKA, the function at the index of the address at the stack pointer.
+         [
+            function       0
+            parameter      1
+            address(0)     2        <-- SP=2, MEMORY[SP]=0,
+         ]                                    MEMORY[MEMORY[SP]]=function
+
+   (2)   Only DOCOL (and >R) push to the stack
+   (3)   Only EXIT (and R>) pop from the stack
+
+         Not using the top of the call stack as the SP may be the answer.
+
+         The SP is the current function that will be executed. DOCOL pushes the
+         next index to the call stack, and calls NEXT:
+                           CS+=( $((SP += _DEFS)) )
+                           NEXT
+
+         
+         Next does...
+            1. set stack pointer to the addr at the current M[SP]
+            2. incr the top of the CS
+            3. call $SP
+                           SP=${M[ CS[-1]++ ]}
+                           ${M[SP]}
+
+         Or on one line
+                           ${M[ SP=M[CS[-1]++] ]}
 
 
+'splorin', does this work
+
+MEMORY = [  EXIT        0
+         ,  PLUS        1
+         ,  DUP         2
+         ,  BRANCH      3
+         ,  INTERPRET   4
+         ,  DOCOL       5        <-- double
+         ,  2           6
+         ,  1           7
+         ,  0           8
+         ,  DOCOL       9        <-- quit
+         ,  4           10
+         ,  3           11
+         ,  -2          12
+         ]
 
 
-MEMORY is an array.
+Program loop, running 'DOUBLE'
+   SP = 9 ; M[SP]
 
-Native BASH words are defined as:
-   idx   +0       function name
-   idx   +1       flag
+   DOCOL (quit)         SP = 10,  CS { 10 }
+   NEXT                 SP = 4,   CS { 11 }
+   INTERPRET
+   KEY -> WORD
+   "user types DOUBLE"
+   FIND                 SP = 5,   CS { 11 }
+   M[SP]
+   DOCOL (double)       SP = 6,   CS { 11, 6 }
+   NEXT                 SP = 2,   CS { 11, 7 }
+   DUP  ; NEXT          SP = 1,   CS { 11, 8 }
+   PLUS ; NEXT          SP = 0,   CS { 11, 9 }
+   EXIT                 SP = 0,   CS { 11    }
+    calls NEXT          SP = 3,   CS { 12    }
+   BRANCH
+    updates CS          SP = 3,   CS { 10    }
+    calls NEXT
 
-Example:
+Back where we started 17k
 
-MEMORY = [
-   code_DUP       <-- function name
-   1              <-- flag
-]
-
-
-FORTH words are defined as:
-   idx   +0       "interpreter function"
-   idx   +1       flag
-   idx   +N       definition address(s)
-   idx   +N       definition address(s)
-   idx   +N       definition address(s)
-   idx   +N       definition address(s)
-
-Example:
-
-: DOUBLE DUP + ;
-
-# (ignore flags for now)
-
-MEMORY = [        # idx,   what is
-   code_PLUS      #
-   code_DUP       #
-   DOCOL          # DOUBLE
-   1              #
-   0              #
-   6              #
-   DOCOL          # DOUBLE
-   1              #
-   0              #
-   6              #
-   code_EXIT      #
-]
-
-
-
-CACHE = {
-   'PLUS'   : 0
-   'DUP'    : 1
-   'DOUBLE' : 5
-}
-
-
-IP
-
-RS { 3 3 }
-
-
-
-SP   = 4
-ADDR = MEMORY[SP]
-MEMORY[ADDR]
-
-MEMORY[MEMORY[SP]]
-MEMORY[SP]
-
-
-The return stack (RS) is an array of pointers to places in MEMORY.
-The top of the RS is effectively the intruction pointer.
-
-
-Each FORTH function ends with a function NEXT,
-Which...
-
-   1. Increments the IP
-   2. Calls the function at the address of MEMORY[IP]
-
-Each BASH function ends with an EXIT,
-Which...
-
-   1. Pops the top of the RS
-   2. Calls NEXT
-
-
-How it would look...
-Interpreter sees the word `DOUBLE`, and runs the interpreter function at its
-address in memory (DOCOL @ MEMORY[1]).
-
-RS { 1 }
-
-
-DOCOL does...
-
-   1. Increments IP to the first word of its definition
-   2. Pushes index of self to RS
-   3. Calls NEXT
-
-RS { 2  2 }
-
-
-Since the return stack is holding addresses of addresses.... NEXT now has to
-call
-      MEMORY[ MEMORY[ RS[-1] ]]
-
-      Or
-      MEMORY[ MEMORY[ 3 ]]
-
-      Or
-      MEMORY[ 1 ]
-
-      Or
-      code_DUP
-
-
-I kinda hate this.
-
-Also weird, because return stack now can't hold addresses of things to execute.
-Has to hold addrs of addrs of things to execute.
-
-And... Means there's a special case in the interpreter.
-
-When intr sees the word `DOUBLE`, it looks it up in dict and finds the address
-is 3.
-
-For consistency and maximum elegance, I'd like FIND to push 3 to the RS and call
-NEXT. But hat doesn't work, because I'd need an addr of addr.
-
-Double indirection sometimes, not always. Always needs a special case.
+I think this works.

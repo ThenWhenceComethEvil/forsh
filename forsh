@@ -14,10 +14,10 @@ declare -g  _LINE=''       # String from `read` before split into chars
 declare -ga KEY_BUFFER=()  # Array of single characters from user input
 declare -gi KEY_INDEX=0    # Position in the KEY_BUFFER
 
-declare -ga S=()           # Parameter stack. Values.
-declare -ga RS=()          # Return stack. Address pointers.
-declare -gi IP=            # Instruction pointer
 declare -ga M=()           # Word dictionary.
+declare -ga S=()           # Parameter stack. Values.
+declare -ga CS=()          # Call stack, points to MEMORY locations
+declare -gi SP=            # Stack pointer
 
 #                                  constants
 #-------------------------------------------------------------------------------
@@ -41,18 +41,18 @@ function debug_stack {
 }
 
 
-function debug_rstack {
+function debug_cstack {
    tput bold
-   printf 'RS'
+   printf 'CS'
    tput sgr0
 
    tput setaf 4
    printf '%10s   %s%25s\n'  'addr'  'value'  'dict word'
    tput sgr0
 
-   len=$(( ${#RS[@]} - 1 ))
+   len=$(( ${#CS[@]} - 1 ))
    for (( i=len; i>=0; --i )) ; do
-      _i="${RS[i]}"
+      _i="${CS[i]}"
       printf '%8s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[${M[_i]}]}"
    done
 
@@ -102,26 +102,19 @@ function def_word {
 
 
 function EXIT {
-   unset 'RS[-1]'
+   unset 'CS[-1]'
    NEXT
 }
 
 
 function DOCOL {
-   # Increments the top of the return stack by the _DEFS offset & executes.
-   #(( RS[-1] += _DEFS ))
-   NEXT
-}
-
-
-function LOAD {
-   RS+=( ${M[RS[-1]++]} )
+   CS+=( $((SP += _DEFS)) )
    NEXT
 }
 
 
 function NEXT {
-   ${M[RS[-1]++]}
+   ${M[ SP=M[CS[-1]++] ]}
 }
 
 #                              native bash words
@@ -214,9 +207,10 @@ def_code  NUMBER  code_NUMBER
 
 
 function code_FIND {
-   S+=( "${CACHE[${S[-1]}]:- -1}" )
-   unset 'S[-2]'
+   _addr="${CACHE[${S[-1]}]}" 
+   unset 'S[-1]'
 
+   S+=( "${_addr:- -1}" )
    if [[ ! $1 ]] ; then
       NEXT
    fi
@@ -225,7 +219,7 @@ def_code  FIND  code_FIND
 
 
 function code_BRANCH {
-   (( RS[-1] += M[RS[-1]] ))
+   (( CS[-1] += M[CS[-1]] ))
    NEXT
 }
 def_code  BRANCH  code_BRANCH
@@ -240,19 +234,17 @@ function code_INTERPRET {
       exit 1
    fi
 
-   RS+=( ${S[-1]} )
+   IP=${S[-1]}
    unset 'S[-1]'
-
-   NEXT
+   ${M[IP]}
 }
 def_code  INTERPRET  code_INTERPRET
 
 
 word_QUIT=(
    QUIT
-   LOAD ${CACHE[INTERPRET]}
-   LOAD ${CACHE[BRANCH]}
-   -3
+   ${CACHE[INTERPRET]}
+   ${CACHE[BRANCH]} -2
 )
 def_word "${word_QUIT[@]}"
 # This needs to be called after the `def_code` for INTERPRET & BRANCH, or they
@@ -263,7 +255,5 @@ def_word "${word_QUIT[@]}"
 #-------------------------------------------------------------------------------
 debug_memory
 
-#set -x
-
-RS+=( ${CACHE[QUIT]} )
-NEXT
+SP=${CACHE[QUIT]}
+${M[SP]}
