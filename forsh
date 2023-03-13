@@ -17,8 +17,7 @@ declare -gi KEY_INDEX=0    # Position in the KEY_BUFFER
 declare -ga S=()           # Parameter stack. Values.
 declare -ga RS=()          # Return stack. Address pointers.
 declare -gi IP=            # Instruction pointer
-declare -ga M=( '' )       # Word dictionary. Idx starts at 1. 0 is the NULL
-                           # index of an unfound word.
+declare -ga M=()           # Word dictionary.
 
 #                                  constants
 #-------------------------------------------------------------------------------
@@ -54,7 +53,7 @@ function debug_rstack {
    len=$(( ${#RS[@]} - 1 ))
    for (( i=len; i>=0; --i )) ; do
       _i="${RS[i]}"
-      printf '%8s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[$_i]}"
+      printf '%8s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[${M[_i]}]}"
    done
 
    printf '\n'
@@ -82,24 +81,23 @@ function debug_memory {
 #
 #-------------------------------------------------------------------------------
 # @arg   $1    :str     Word name
-# @arg   $2    :fn      Interpreter function
-# @arg   $3    :binary  Binary flag [2#001, 2#010]
+# @arg   $2    :str     Interpreter function name
+# @arg   $3    :int     Flag
 function def_code {
-   HEAD="${#M[@]}"
+   HEAD=${#M[@]}
    M+=( "$2" )
-
    CACHE["$1"]="$HEAD"
    RCACHE["$HEAD"]="$1"
 }
 
 
 function def_word {
-   HEAD="${#M[@]}"
+   HEAD=${#M[@]}
    CACHE["$1"]="$HEAD"
    RCACHE["$HEAD"]="$1"
 
    shift
-   M+=( DOCOL "$@" )
+   M+=( 'DOCOL'  "$@" )
 }
 
 
@@ -110,15 +108,20 @@ function EXIT {
 
 
 function DOCOL {
-   # Increments the top of the return stack by the _DEFS offset.
-   (( RS[-1] += _DEFS )) ; NEXT
+   # Increments the top of the return stack by the _DEFS offset & executes.
+   #(( RS[-1] += _DEFS ))
+   NEXT
+}
+
+
+function LOAD {
+   RS+=( ${M[RS[-1]++]} )
+   NEXT
 }
 
 
 function NEXT {
-   # Top of RS[] contains an address in M[], which contains an address in M[].
-   # Gotta double-index it.
-   ${M[M[RS[-1]]]}
+   ${M[RS[-1]++]}
 }
 
 #                              native bash words
@@ -156,7 +159,9 @@ function code_KEY {
    fi
 
    S+=( "${KEY_BUFFER[KEY_INDEX++]}" )
-   [[ $1 ]] || NEXT
+   if [[ ! $1 ]] ; then
+      NEXT
+   fi
 }
 def_code  KEY  code_KEY
 
@@ -188,10 +193,8 @@ function code_WORD {
    done
    unset 'S[-1]'  #<-- whitespace after word
 
-   [[ $1 ]] || {
-      NEXT
-      S+=( "$BUFFER" )
-   }
+   S+=( "$BUFFER" )
+   [[ $1 ]] || NEXT
 }
 def_code  WORD  code_WORD
 
@@ -203,16 +206,20 @@ function code_NUMBER {
       S+=( "${BUFFER}"  0 )
    fi
 
-   [[ $1 ]] || NEXT
+   if [[ ! $1 ]] ; then
+      NEXT
+   fi
 }
 def_code  NUMBER  code_NUMBER
 
 
 function code_FIND {
-   IP="${CACHE[$BUFFER]:-0}" 
-   [[ $1 ]] || {
-      S+=( "$IP" ) ; NEXT
-   }
+   S+=( "${CACHE[${S[-1]}]:- -1}" )
+   unset 'S[-2]'
+
+   if [[ ! $1 ]] ; then
+      NEXT
+   fi
 }
 def_code  FIND  code_FIND
 
@@ -228,20 +235,24 @@ function code_INTERPRET {
    code_WORD 'no_next'
    code_FIND 'no_next' 
 
-   if ! (( IP )) ; then
+   if (( S[-1] == -1 )) ; then
       echo "no: $BUFFER"
       exit 1
    fi
 
-   ${M[IP]}
+   RS+=( ${S[-1]} )
+   unset 'S[-1]'
+
+   NEXT
 }
 def_code  INTERPRET  code_INTERPRET
 
 
 word_QUIT=(
    QUIT
-   "${CACHE[INTERPRET]}"
-   "${CACHE[BRANCH]}" -3
+   LOAD ${CACHE[INTERPRET]}
+   LOAD ${CACHE[BRANCH]}
+   -3
 )
 def_word "${word_QUIT[@]}"
 # This needs to be called after the `def_code` for INTERPRET & BRANCH, or they
@@ -250,10 +261,9 @@ def_word "${word_QUIT[@]}"
 
 #                                    engage
 #-------------------------------------------------------------------------------
-RS+=( ${CACHE[QUIT]} ) ; DOCOL
-# Not sure how to actually start the program. I guess this is similar-ish to how
-# jonesforth kicks itself off.
+debug_memory
 
-#debug_stack
-#debug_rstack
-#debug_memory
+#set -x
+
+RS+=( ${CACHE[QUIT]} )
+NEXT
