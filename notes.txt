@@ -84,3 +84,58 @@ Program loop, running 'DOUBLE'
 Back where we started 17k
 
 I think this works.
+
+--- 
+
+It does work! Woo!
+
+---
+
+
+What words will be useful?
+
+(NOTE: user words should have no final stack result, and should not modify the
+       initial stack item(s))
+
+List functions
+   - MAP
+   - LEN
+
+String functions
+   - EQUAL?          <-- different functions for string equality and numeric?
+   - UPPER?              maybe call this one 'MATCH' or something
+   - LOWER?
+   - HEX?
+   - INTEGER?
+
+Path functions
+   - EXISTS?
+   - CAN?
+      - READ CAN? WRITE CAN?
+      - : READABLE? READ CAN? ;
+      - : WRITABLE? WRITE CAN? ;
+   - IS?
+      - DIR IS? LINK IS?
+      - : IS_DIR? DIR IS? ;
+
+(Wonder if I want the IS? and CAN? functions to be their own words. No IS?, just
+ IS_DIR? and IS_FILE? independently.)
+
+Integer functions
+   - <= < >= > != ==
+   - !0 =0 >0 <0
+
+Boolean/logical functions
+   - TRUE
+   - TRUE?
+   - FALSE
+   - FALSE?
+   - AND OR NOT
+
+General words
+   - Anonymous functions through '['
+      - Don't yet know how these actually work
+   - Strings
+   - Variables
+      - Arrays
+      - Maps

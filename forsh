@@ -117,7 +117,264 @@ function NEXT {
    ${M[ SP=M[CS[-1]++] ]}
 }
 
-#                              native bash words
+
+#                               forth primitives
+#-------------------------------------------------------------------------------
+function code_DROP {
+   unset 'S[-1]'
+   NEXT
+}
+def_code  DROP  code_DROP
+
+
+function code_SWAP {
+   S+=( "${S[-2]}" )
+   unset 'S[-3]'
+   NEXT
+}
+def_code  SWAP  code_SWAP
+
+
+function code_DUP {
+   S+=( "${S[-1]}" )
+   NEXT
+}
+def_code  DUP  code_DUP
+
+
+function code_OVER {
+   S+=( "${S[-2]}" )
+   NEXT
+}
+def_code  OVER  code_OVER
+
+
+function code_ROT {
+   _a="${S[-1]}"
+   _b="${S[-2]}"
+   _c="${S[-3]}"
+   unset 'S[-1]' 'S[-2]' 'S[-3]'
+   S+=( "$_c"  "$_a"  "$_b" )
+   NEXT
+}
+def_code  ROT  code_ROT
+
+
+function code_NROT {
+   _a="${S[-1]}"
+   _b="${S[-2]}"
+   _c="${S[-3]}"
+   unset 'S[-1]' 'S[-2]' 'S[-3]'
+   S+=( "$_b"  "$_c"  "$_a" )
+   NEXT
+}
+def_code  '-ROT'  code_NROT
+
+
+function code_2DROP {
+   unset 'S[-2]' 'S[-1]'
+   NEXT
+}
+def_code  2DROP  code_2DROP
+
+
+function code_2DUP {
+   S+=( "${S[-2]}"  "${S[-1]}" )
+   NEXT
+}
+def_code  2DUP  code_2DUP
+
+
+function code_2SWAP {
+   S+=( "${S[-4]}"  "${S[-3]}" )
+   unset 'S[-6]' 'S[-5]'
+   NEXT
+}
+def_code  2SWAP  code_2SWAP
+
+
+function code_?DUP {
+   if (( S[-1] )) ; then
+      S+=( "${S[-1]}" )
+   fi
+   NEXT
+}
+def_code  ?DUP  code_?DUP
+
+
+function code_INCR {
+   (( ++S[-1] ))
+   NEXT
+}
+def_code  '++'  code_INCR
+
+
+function code_DECR {
+   (( --S[-1] ))
+   NEXT
+}
+def_code  '--'  code_DECR
+
+
+function code_ADD {
+   (( S[-2] += S[-1] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '+'  code_ADD
+
+
+function code_SUB {
+   (( S[-2] -= S[-1] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '-'  code_SUB
+
+
+function code_MUL {
+   (( S[-2] *= S[-1] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '*'  code_MUL
+
+
+function code_DIV {
+   (( S[-2] /= S[-1] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '/'  code_DIV
+
+
+function code_EQ {
+   (( S[-2] = (S[-2] == S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '='  code_EQ
+
+
+function code_NE {
+   (( S[-2] = (S[-2] != S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '!='  code_NE
+
+
+function code_LT {
+   (( S[-2] = (S[-2] < S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '<'  code_LT
+
+
+function code_GT {
+   (( S[-2] = (S[-2] > S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '>'  code_L
+
+
+function code_LE {
+   (( S[-2] = (S[-2] <= S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '<='  code_L
+
+
+function code_GE {
+   (( S[-2] = (S[-2] >= S[-1]) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '>='  code_L
+
+
+function code_ZEQ {
+   (( S[-1] = (S[-1] == 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0='  code_ZEQ
+
+
+function code_ZNE {
+   (( S[-1] = (S[-1] != 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0!'  code_ZNE
+
+
+function code_ZLT {
+   (( S[-1] = (S[-1] < 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0<'  code_ZLT
+
+
+function code_ZGT {
+   (( S[-1] = (S[-1] > 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0>'  code_ZL
+
+
+function code_ZLE {
+   (( S[-1] = (S[-1] <= 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0<='  code_ZL
+
+
+function code_ZGE {
+   (( S[-1] = (S[-1] >= 0) ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '0>='  code_ZL
+
+
+function code_AND {
+   (( S[-1] &= S[-2] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  AND  code_AND
+
+
+function code_OR {
+   (( S[-1] |= S[-2] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  OR  code_OR
+
+
+function code_XOR {
+   (( S[-1] ^= S[-2] ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  XOR  code_XOR
+
+
+function code_NOT {
+   (( S[-1] = !S[-1] ))
+   NEXT
+}
+def_code  NOT  code_NOT
+
+#
 #-------------------------------------------------------------------------------
 function code_BYE { exit 0 ;}
 def_code  BYE  code_BYE
@@ -192,18 +449,25 @@ function code_WORD {
 def_code  WORD  code_WORD
 
 
-function code_NUMBER {
-   if [[ "$BUFFER" =~ (\-?[[:digit:]]+[[:digit:]_]*) ]] ; then
-      S+=( "${BUFFER//_}"  1 )
-   else
-      S+=( "${BUFFER}"  0 )
-   fi
+#function code_NUMBER {
+#   if [[ "$BUFFER" =~ (\-?[[:digit:]]+[[:digit:]_]*) ]] ; then
+#      S+=( "${BUFFER//_}"  1 )
+#   else
+#      S+=( "${BUFFER}"  0 )
+#   fi
+#
+#   if [[ ! $1 ]] ; then
+#      NEXT
+#   fi
+#}
+#def_code  NUMBER  code_NUMBER
 
-   if [[ ! $1 ]] ; then
-      NEXT
-   fi
-}
-def_code  NUMBER  code_NUMBER
+
+#function code_CALL {
+#   SP=${S[-1]}
+#   unset 'S[-1]'
+#   ${M[SP]}
+#}
 
 
 function code_FIND {
@@ -234,9 +498,9 @@ function code_INTERPRET {
       exit 1
    fi
 
-   IP=${S[-1]}
+   SP=${S[-1]}
    unset 'S[-1]'
-   ${M[IP]}
+   ${M[SP]}
 }
 def_code  INTERPRET  code_INTERPRET
 
