@@ -1,7 +1,9 @@
 #!/bin/bash
 #
 # FORTH in bash ... why do I do these things to myself.
-#
+#-------------------------------------------------------------------------------
+set -e
+
 #===============================================================================
 #                                   globals
 #-------------------------------------------------------------------------------
@@ -29,6 +31,8 @@ declare -gi _DEFS=1        #  beginning of definition word(s)
                            # Flag constants
 declare -gi _IMMD=1        #  immediate
 declare -gi _HIDE=2        #  hidden from `FIND`
+
+declare -gi STATE=0        # Executing: 0,  compiling: 1
 
 #                                  debugging
 #-------------------------------------------------------------------------------
@@ -84,26 +88,26 @@ function debug_memory {
 # @arg   $2    :str     Interpreter function name
 # @arg   $3    :int     Flag
 function def_code {
-   HEAD=${#M[@]}
+   LATEST=${#M[@]}
    M+=( "$2" )
-   CACHE["$1"]="$HEAD"
-   RCACHE["$HEAD"]="$1"
+   CACHE["$1"]="$LATEST"
+   RCACHE["$LATEST"]="$1"
 }
 
 
 function def_word {
-   HEAD=${#M[@]}
-   CACHE["$1"]="$HEAD"
-   RCACHE["$HEAD"]="$1"
+   LATEST=${#M[@]}
+   CACHE["$1"]="$LATEST"
+   RCACHE["$LATEST"]="$1"
 
    shift
    M+=( 'DOCOL'  "$@" )
 }
 
 
-function EXIT {
-   unset 'CS[-1]'
-   NEXT
+function NEXT {
+   echo "${M[M[CS[-1]]]}"
+   ${M[ SP=M[CS[-1]++] ]}
 }
 
 
@@ -113,10 +117,10 @@ function DOCOL {
 }
 
 
-function NEXT {
-   ${M[ SP=M[CS[-1]++] ]}
+function EXIT {
+   unset 'CS[-1]'
+   NEXT
 }
-
 
 #                               forth primitives
 #-------------------------------------------------------------------------------
@@ -164,7 +168,7 @@ function code_NROT {
    _a="${S[-1]}"
    _b="${S[-2]}"
    _c="${S[-3]}"
-   unset 'S[-1]' 'S[-2]' 'S[-3]'
+   unset 'S[-3]' 'S[-2]' 'S[-1]'
    S+=( "$_b"  "$_c"  "$_a" )
    NEXT
 }
@@ -374,10 +378,136 @@ function code_NOT {
 }
 def_code  NOT  code_NOT
 
+#                              memory management
+#-------------------------------------------------------------------------------
+# I don't know if these are necessary yet. May want to change these into
+# modifying a global VARIABLES{} assoc. array.
+function code_STORE {
+   (( M[S[-1]] = M[S[-2]] ))
+   unset 'S[-2]' 'S[-1]'
+   NEXT
+}
+def_code  '!'  code_STORE
+
+
+function code_FETCH {
+   S+=( "${M[S[-1]]}" )
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '@'  code_FETCH
+
+
+function code_ADDSTORE {
+   (( M[S[-1]] += S[-2] ))
+   unset 'S[-1]' 'S[-2]'
+   NEXT
+}
+def_code  '+!'  code_ADDSTORE
+
+
+function code_SUBSTORE {
+   (( M[S[-1]] += S[-2] ))
+   unset 'S[-1]' 'S[-2]'
+   NEXT
+}
+def_code  '+!'  code_SUBSTORE
+
+
+# This does more in real FORTH, in which it pushes the header (link, name len,
+# name, and padding to 4-byte boundry), and sets LATEST & HERE.
 #
+# The latter variable is unnecessary. No need to point to final index in memory.
+# Can easily push to end of M[] or S[].
+#
+# Likewise, there is no header here. First element is the interpreter function.
+#
+# This...
+#  1. Sets $LATEST to top of the stack
+#  2. Creates CACHE entry of $1 -> $LATEST
+#
+function code_CREATE {
+   LATEST=${#M[@]}
+   CACHE["${S[-1]}"]="$LATEST"
+   unset 'S[-1]'
+   NEXT
+}
+def_code  CREATE  code_CREATE
+
+
+# Unsure how this translates right now. Just pushes int to memory?
+function code_COMMA {
+   M+=( "${S[-1]}" )
+   unset 'S[-1]'
+   NEXT
+}
+def_code  COMMA  code_COMMA
+
+#                                 return stack
+#-------------------------------------------------------------------------------
+function code_TOR {
+   CS+=( "${S[-1]}" )
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '>R'  code_TOR
+
+
+function code_FROMR {
+   S+=( "${CS[-1]}" )
+   unset 'CS[-1]'
+   NEXT
+}
+def_code  'R>'  code_FROMR
+
+
+function code_RDROP {
+   unset 'CS[-1]'
+   NEXT
+}
+def_code  'RDROP'  code_RDROP
+
+##                                  variables
+##-------------------------------------------------------------------------------
+#function code_STATE {
+#   S+=( "$STATE" )
+#   NEXT
+#}
+#def_code  'STATE'  code_STATE
+#
+#
+#function code_LATEST {
+#   S+=( "$LATEST" )
+#   NEXT
+#}
+#def_code  'LATEST'  code_LATEST
+
+##                                  constants
+##-------------------------------------------------------------------------------
+#function code_IMMD {
+#   S+=( "$_IMMD" )
+#   NEXT
+#}
+#def_code  'F_IMMD'  code_IMMD
+#
+#
+#function code_HIDE {
+#   S+=( "$_HIDE" )
+#   NEXT
+#}
+#def_code  'F_HIDE'  code_HIDE
+
+#                                     I/O
 #-------------------------------------------------------------------------------
 function code_BYE { exit 0 ;}
 def_code  BYE  code_BYE
+
+
+function code_EMIT {
+   printf '%s'  "${S[-1]}"
+   unset 'S[-1]'
+}
+def_code  EMIT  code_EMIT
 
 
 # KEY()
@@ -395,13 +525,6 @@ function code_KEY {
    if (( KEY_INDEX == ${#KEY_BUFFER[@]} )) ; then
       KEY_BUFFER=() ; KEY_INDEX=0
 
-      # TODO: I don't love this as a solution. Trying to:
-      #        * read line from user input
-      #        * not process until hitting <CR>
-      #        * allow for readline editing, navigating, etc
-      #
-      #       This is at 90%. Still some oddness.
-      #
       read -er _LINE || exit 0
       while read -N1 -r _char ; do
          KEY_BUFFER+=( "$_char" )
@@ -418,7 +541,7 @@ def_code  KEY  code_KEY
 
 # WORD()
 # @description
-#  Calls `KEY` until building a sequence of non-spece characters.
+#  Calls `KEY` until building a sequence of non-space characters.
 #  
 function code_WORD {
    BUFFER=''
@@ -449,25 +572,26 @@ function code_WORD {
 def_code  WORD  code_WORD
 
 
-#function code_NUMBER {
-#   if [[ "$BUFFER" =~ (\-?[[:digit:]]+[[:digit:]_]*) ]] ; then
-#      S+=( "${BUFFER//_}"  1 )
-#   else
-#      S+=( "${BUFFER}"  0 )
-#   fi
-#
-#   if [[ ! $1 ]] ; then
-#      NEXT
-#   fi
-#}
-#def_code  NUMBER  code_NUMBER
+function code_LIT {
+   S+=( "${M[CS[-1]]}" )
+   NEXT
+}
+def_code  LIT  code_LIT
 
 
-#function code_CALL {
-#   SP=${S[-1]}
-#   unset 'S[-1]'
-#   ${M[SP]}
-#}
+function code_NUMBER {
+   if [[ "${S[-1]}" =~ ^(\-?[[:digit:]]+[[:digit:]_]*)$ ]] ; then
+      unset 'S[-1]'
+      S+=( "${BASH_REMATCH[1]//_}"  1 )
+   else
+      S+=( 0 )
+   fi
+
+   if [[ ! $1 ]] ; then
+      NEXT
+   fi
+}
+def_code  NUMBER  code_NUMBER
 
 
 function code_FIND {
@@ -488,7 +612,8 @@ function code_BRANCH {
 }
 def_code  BRANCH  code_BRANCH
 
-
+#                              interpreter words
+#-------------------------------------------------------------------------------
 function code_INTERPRET {
    code_WORD 'no_next'
    code_FIND 'no_next' 
@@ -506,18 +631,43 @@ def_code  INTERPRET  code_INTERPRET
 
 
 word_QUIT=(
-   QUIT
    ${CACHE[INTERPRET]}
    ${CACHE[BRANCH]} -2
 )
-def_word "${word_QUIT[@]}"
+def_word  'QUIT'  "${word_QUIT[@]}"
 # This needs to be called after the `def_code` for INTERPRET & BRANCH, or they
 # won't exist in the CACHE yet. I'm vaguely concerned about circular
 # dependencies, but we'll see if that happens.
 
+
+function code_RBRAC {
+   (( STATE = 0 ))
+   NEXT
+}
+def_code  '['  code_RBRAC
+
+
+function code_LBRAC {
+   (( STATE = 1 ))
+   NEXT
+}
+def_code  ']'  code_LBRAC  "$_IMMD"
+
+
+word_COLON=(
+   ${CACHE[WORD]}
+   ${CACHE[CREATE]}
+   #${CACHE[LIT]}     'DOCOL'
+   <-- need to call the address of EXIT but
+       it doesn't have an associated word
+)
+def_word  ':'  "${word_COLON[@]}"
+
 #                                    engage
 #-------------------------------------------------------------------------------
 debug_memory
+
+#set -x
 
 SP=${CACHE[QUIT]}
 ${M[SP]}
