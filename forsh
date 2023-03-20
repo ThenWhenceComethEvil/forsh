@@ -2,7 +2,12 @@
 #-------------------------------------------------------------------------------
 # FORTH in bash ... why do I do these things to myself.
 #-------------------------------------------------------------------------------
-# Can't `set -e` here, as so many of the arithmetic tests return 0.
+set -e
+
+
+# `def_word` is putting the flags AFTER the codewords. Both `def_` functions
+# should have arg format:  $WORD  $FLAG  $DEF(s)
+
 
 #===============================================================================
 #                                   globals
@@ -33,6 +38,7 @@ declare -gi  FLAG_OFFSET=1    # Flag offset
 declare -gi  DEFS_OFFSET=2    # Beginning of definition word(s)
 
 # Flag constants
+declare -gi  NO_FLAG=0
 declare -gi  IMMD_FLAG=1      # Immediate
 declare -gi  HIDE_FLAG=2      # Hidden from `FIND`
 
@@ -101,11 +107,11 @@ function debug_cache {
 #
 #-------------------------------------------------------------------------------
 # @arg   $1    :str     Word name
-# @arg   $2    :str     Interpreter function name
-# @arg   $3    :int     Flag
+# @arg   $2    :FLAG    Flag
+# @arg   $3    :str     Interpreter function name
 function def_code {
    LATEST=${#M[@]}
-   M+=( "$2"  "${3:-0}" )
+   M+=( "$3"  "$2" )
 
    # Tracks previous definitions for the same word. If the word 'DOUBLE' is
    # already defined at M[10], and now at M[20], PREV_DEFS looks like:
@@ -125,7 +131,7 @@ function def_code {
 
 function def_word {
    local name="$1"
-   local -i flag="${2:-0}"
+   local -i flag="$2"
    shift ; shift
 
    LATEST=${#M[@]}
@@ -151,20 +157,20 @@ function code_EXIT {
    unset 'CS[-1]'
    NEXT
 }
-def_code  EXIT  code_EXIT
+def_code  EXIT  $NO_FLAG  code_EXIT
 
 
 #                               forth primitives
 #-------------------------------------------------------------------------------
 function code_BYE { exit 0 ;}
-def_code  BYE  code_BYE
+def_code  BYE  $NO_FLAG  code_BYE
 
 
 function code_DROP {
    unset 'S[-1]'
    NEXT
 }
-def_code  DROP  code_DROP
+def_code  DROP  $NO_FLAG  code_DROP
 
 
 function code_SWAP {
@@ -172,21 +178,21 @@ function code_SWAP {
    unset 'S[-3]'
    NEXT
 }
-def_code  SWAP  code_SWAP
+def_code  SWAP  $NO_FLAG  code_SWAP
 
 
 function code_DUP {
    S+=( "${S[-1]}" )
    NEXT
 }
-def_code  DUP  code_DUP
+def_code  DUP  $NO_FLAG  code_DUP
 
 
 function code_OVER {
    S+=( "${S[-2]}" )
    NEXT
 }
-def_code  OVER  code_OVER
+def_code  OVER  $NO_FLAG  code_OVER
 
 
 function code_ROT {
@@ -197,7 +203,7 @@ function code_ROT {
    S+=( "$_c"  "$_a"  "$_b" )
    NEXT
 }
-def_code  ROT  code_ROT
+def_code  ROT  $NO_FLAG  code_ROT
 
 
 function code_NROT {
@@ -208,21 +214,21 @@ function code_NROT {
    S+=( "$_b"  "$_c"  "$_a" )
    NEXT
 }
-def_code  '-ROT'  code_NROT
+def_code  '-ROT'  $NO_FLAG  code_NROT
 
 
 function code_2DROP {
    unset 'S[-2]' 'S[-1]'
    NEXT
 }
-def_code  2DROP  code_2DROP
+def_code  2DROP  $NO_FLAG  code_2DROP
 
 
 function code_2DUP {
    S+=( "${S[-2]}"  "${S[-1]}" )
    NEXT
 }
-def_code  2DUP  code_2DUP
+def_code  2DUP  $NO_FLAG  code_2DUP
 
 
 function code_2SWAP {
@@ -230,30 +236,30 @@ function code_2SWAP {
    unset 'S[-6]' 'S[-5]'
    NEXT
 }
-def_code  2SWAP  code_2SWAP
+def_code  2SWAP  $NO_FLAG  code_2SWAP
 
 
-function code_?DUP {
+function code_ques_DUP {
    if (( S[-1] )) ; then
       S+=( "${S[-1]}" )
    fi
    NEXT
 }
-def_code  ?DUP  code_?DUP
+def_code  ?DUP  $NO_FLAG  code_ques_DUP
 
 
 function code_INCR {
    (( ++S[-1] ))
    NEXT
 }
-def_code  '++'  code_INCR
+def_code  '++'  $NO_FLAG  code_INCR
 
 
 function code_DECR {
    (( --S[-1] ))
    NEXT
 }
-def_code  '--'  code_DECR
+def_code  '--'  $NO_FLAG  code_DECR
 
 
 function code_ADD {
@@ -261,7 +267,7 @@ function code_ADD {
    unset 'S[-1]'
    NEXT
 }
-def_code  '+'  code_ADD
+def_code  '+'  $NO_FLAG  code_ADD
 
 
 function code_SUB {
@@ -269,7 +275,7 @@ function code_SUB {
    unset 'S[-1]'
    NEXT
 }
-def_code  '-'  code_SUB
+def_code  '-'  $NO_FLAG  code_SUB
 
 
 function code_MUL {
@@ -277,7 +283,7 @@ function code_MUL {
    unset 'S[-1]'
    NEXT
 }
-def_code  '*'  code_MUL
+def_code  '*'  $NO_FLAG  code_MUL
 
 
 function code_DIV {
@@ -285,7 +291,7 @@ function code_DIV {
    unset 'S[-1]'
    NEXT
 }
-def_code  '/'  code_DIV
+def_code  '/'  $NO_FLAG  code_DIV
 
 
 function code_EQ {
@@ -293,7 +299,7 @@ function code_EQ {
    unset 'S[-1]'
    NEXT
 }
-def_code  '='  code_EQ
+def_code  '='  $NO_FLAG  code_EQ
 
 
 function code_NE {
@@ -301,7 +307,7 @@ function code_NE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '!='  code_NE
+def_code  '!='  $NO_FLAG  code_NE
 
 
 function code_LT {
@@ -309,7 +315,7 @@ function code_LT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '<'  code_LT
+def_code  '<'  $NO_FLAG  code_LT
 
 
 function code_GT {
@@ -317,7 +323,7 @@ function code_GT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '>'  code_L
+def_code  '>'  $NO_FLAG  code_L
 
 
 function code_LE {
@@ -325,7 +331,7 @@ function code_LE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '<='  code_L
+def_code  '<='  $NO_FLAG  code_L
 
 
 function code_GE {
@@ -333,7 +339,7 @@ function code_GE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '>='  code_L
+def_code  '>='  $NO_FLAG  code_L
 
 
 function code_ZEQ {
@@ -341,7 +347,7 @@ function code_ZEQ {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0='  code_ZEQ
+def_code  '0='  $NO_FLAG  code_ZEQ
 
 
 function code_ZNE {
@@ -349,7 +355,7 @@ function code_ZNE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0!'  code_ZNE
+def_code  '0!'  $NO_FLAG  code_ZNE
 
 
 function code_ZLT {
@@ -357,7 +363,7 @@ function code_ZLT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0<'  code_ZLT
+def_code  '0<'  $NO_FLAG  code_ZLT
 
 
 function code_ZGT {
@@ -365,7 +371,7 @@ function code_ZGT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0>'  code_ZL
+def_code  '0>'  $NO_FLAG  code_ZL
 
 
 function code_ZLE {
@@ -373,7 +379,7 @@ function code_ZLE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0<='  code_ZL
+def_code  '0<='  $NO_FLAG  code_ZL
 
 
 function code_ZGE {
@@ -381,7 +387,7 @@ function code_ZGE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0>='  code_ZL
+def_code  '0>='  $NO_FLAG  code_ZL
 
 
 function code_AND {
@@ -389,7 +395,7 @@ function code_AND {
    unset 'S[-1]'
    NEXT
 }
-def_code  AND  code_AND
+def_code  AND  $NO_FLAG  code_AND
 
 
 function code_OR {
@@ -397,7 +403,7 @@ function code_OR {
    unset 'S[-1]'
    NEXT
 }
-def_code  OR  code_OR
+def_code  OR  $NO_FLAG  code_OR
 
 
 function code_XOR {
@@ -405,14 +411,14 @@ function code_XOR {
    unset 'S[-1]'
    NEXT
 }
-def_code  XOR  code_XOR
+def_code  XOR  $NO_FLAG  code_XOR
 
 
 function code_NOT {
    (( S[-1] = !S[-1] ))
    NEXT
 }
-def_code  NOT  code_NOT
+def_code  NOT  $NO_FLAG  code_NOT
 
 #                              memory management
 #-------------------------------------------------------------------------------
@@ -423,7 +429,7 @@ function code_STORE {
    unset 'S[-2]' 'S[-1]'
    NEXT
 }
-def_code  '!'  code_STORE
+def_code  '!'  $NO_FLAG  code_STORE
 
 
 function code_FETCH {
@@ -431,7 +437,7 @@ function code_FETCH {
    unset 'S[-1]'
    NEXT
 }
-def_code  '@'  code_FETCH
+def_code  '@'  $NO_FLAG  code_FETCH
 
 
 function code_ADDSTORE {
@@ -439,7 +445,7 @@ function code_ADDSTORE {
    unset 'S[-1]' 'S[-2]'
    NEXT
 }
-def_code  '+!'  code_ADDSTORE
+def_code  '+!'  $NO_FLAG  code_ADDSTORE
 
 
 function code_SUBSTORE {
@@ -447,7 +453,7 @@ function code_SUBSTORE {
    unset 'S[-1]' 'S[-2]'
    NEXT
 }
-def_code  '-!'  code_SUBSTORE
+def_code  '-!'  $NO_FLAG  code_SUBSTORE
 
 
 # This does more in real FORTH, in which it pushes the header (link, name len,
@@ -468,7 +474,7 @@ function code_CREATE {
    unset 'S[-1]'
    NEXT
 }
-def_code  CREATE  code_CREATE
+def_code  CREATE  $NO_FLAG  code_CREATE
 
 
 # Unsure how this translates right now. Just pushes int to memory?
@@ -477,7 +483,7 @@ function code_COMMA {
    unset 'S[-1]'
    NEXT
 }
-def_code  ','  code_COMMA
+def_code  ','  $NO_FLAG  code_COMMA
 
 #                                 return stack
 #-------------------------------------------------------------------------------
@@ -486,7 +492,7 @@ function code_TOR {
    unset 'S[-1]'
    NEXT
 }
-def_code  '>R'  code_TOR
+def_code  '>R'  $NO_FLAG  code_TOR
 
 
 function code_FROMR {
@@ -494,14 +500,14 @@ function code_FROMR {
    unset 'CS[-1]'
    NEXT
 }
-def_code  'R>'  code_FROMR
+def_code  'R>'  $NO_FLAG  code_FROMR
 
 
 function code_RDROP {
    unset 'CS[-1]'
    NEXT
 }
-def_code  'RDROP'  code_RDROP
+def_code  'RDROP'  $NO_FLAG  code_RDROP
 
 ##                                  variables
 ##-------------------------------------------------------------------------------
@@ -509,29 +515,14 @@ def_code  'RDROP'  code_RDROP
 #   S+=( "$STATE" )
 #   NEXT
 #}
-#def_code  'STATE'  code_STATE
+#def_code  'STATE'  $NO_FLAG  code_STATE
 
 
 function code_LATEST {
    S+=( "$LATEST" )
    NEXT
 }
-def_code  'LATEST'  code_LATEST
-
-##                                  constants
-##-------------------------------------------------------------------------------
-#function code_IMMD {
-#   S+=( "$_IMMD" )
-#   NEXT
-#}
-#def_code  'IMMD_FLAG'  code_IMMD
-#
-#
-#function code_HIDE {
-#   S+=( "$_HIDE" )
-#   NEXT
-#}
-#def_code  'HIDE_FLAG'  code_HIDE
+def_code  'LATEST'  $NO_FLAG  code_LATEST
 
 #                                     I/O
 #-------------------------------------------------------------------------------
@@ -540,17 +531,17 @@ function code_dot {
    unset 'S[-1]'
    NEXT
 }
-def_code  '.'  code_dot
+def_code  '.'  $NO_FLAG  code_dot
 
 
 function code_dot_s { debug_stack  ; NEXT ;}
-def_code  '.s'  code_dot_s
+def_code  '.s'  $NO_FLAG  code_dot_s
 
 function code_dot_m { debug_memory ; NEXT ;}
-def_code  '.m'  code_dot_m
+def_code  '.m'  $NO_FLAG  code_dot_m
 
 function code_dot_c { debug_cache  ; NEXT ;}
-def_code  '.c'  code_dot_c
+def_code  '.c'  $NO_FLAG  code_dot_c
 
 
 function code_dot_cache {
@@ -558,7 +549,7 @@ function code_dot_cache {
    unset 'S[-1]'
    NEXT
 }
-def_code  '.cache'  code_dot_cache
+def_code  '.cache'  $NO_FLAG  code_dot_cache
 
 
 function code_dot_rcache {
@@ -566,7 +557,7 @@ function code_dot_rcache {
    unset 'S[-1]'
    NEXT
 }
-def_code  '.rcache'  code_dot_rcache
+def_code  '.rcache'  $NO_FLAG  code_dot_rcache
 
 
 function code_EMIT {
@@ -574,7 +565,7 @@ function code_EMIT {
    unset 'S[-1]'
    NEXT
 }
-def_code  EMIT  code_EMIT
+def_code  EMIT  $NO_FLAG  code_EMIT
 
 
 # KEY()
@@ -603,7 +594,7 @@ function code_KEY {
       NEXT
    fi
 }
-def_code  KEY  code_KEY
+def_code  KEY  $NO_FLAG  code_KEY
 
 
 function code_WORD {
@@ -634,14 +625,14 @@ function code_WORD {
       NEXT
    fi
 }
-def_code  WORD  code_WORD
+def_code  WORD  $NO_FLAG  code_WORD
 
 
 function code_LIT {
    S+=( "${M[CS[-1]]}" )
    NEXT
 }
-def_code  LIT  code_LIT
+def_code  LIT  $NO_FLAG  code_LIT
 
 
 function code_NUMBER {
@@ -656,7 +647,7 @@ function code_NUMBER {
       NEXT
    fi
 }
-def_code  NUMBER  code_NUMBER
+def_code  NUMBER  $NO_FLAG  code_NUMBER
 
 
 function code_FIND {
@@ -677,14 +668,14 @@ function code_FIND {
       NEXT
    fi
 }
-def_code  FIND  code_FIND
+def_code  FIND  $NO_FLAG  code_FIND
 
 
 function code_BRANCH {
-   (( CS[-1] += M[CS[-1]] ))
+   (( CS[-1] += M[CS[-1]] , 1 ))
    NEXT
 }
-def_code  BRANCH  code_BRANCH
+def_code  BRANCH  $NO_FLAG  code_BRANCH
 
 #                              interpreter words
 #-------------------------------------------------------------------------------
@@ -720,31 +711,31 @@ function code_INTERPRET {
       _push_number
    fi
 }
-def_code  INTERPRET  code_INTERPRET
+def_code  INTERPRET  $NO_FLAG  code_INTERPRET
 
 
 word_QUIT=(
    ${CACHE[INTERPRET]}
    ${CACHE[BRANCH]} -2
 )
-def_word  'QUIT'  "${word_QUIT[@]}"
+def_word  'QUIT'  $NO_FLAG  "${word_QUIT[@]}"
 # This needs to be called after the `def_code` for INTERPRET & BRANCH, or they
 # won't exist in the CACHE yet. I'm vaguely concerned about circular
 # dependencies, but we'll see if that happens.
 
 
 function code_RBRAC {
-   (( STATE = EXECUTE_STATE ))
+   (( STATE = EXECUTE_STATE , 1 ))
    NEXT
 }
-def_code  '['  code_RBRAC
+def_code  '['  $NO_FLAG  code_RBRAC
 
 
 function code_LBRAC {
-   (( STATE = COMPILE_STATE ))
+   (( STATE = COMPILE_STATE , 1 ))
    NEXT
 }
-def_code  ']'  code_LBRAC  "$IMMD_FLAG"
+def_code  ']'  $IMMD_FLAG  code_LBRAC
 
 
 word_COLON=(
@@ -754,7 +745,7 @@ word_COLON=(
    ${CACHE[']']}
    ${CACHE[EXIT]}
 )
-def_word  ':'  "${word_COLON[@]}"
+def_word  ':'  $NO_FLAG  "${word_COLON[@]}"
 
 
 word_SEMI=(
@@ -763,19 +754,19 @@ word_SEMI=(
    ${CACHE[']']}
    ${CACHE[EXIT]}
 )
-def_word  ';'  "${word_SEMI[@]}"
+def_word  ';'  $NO_FLAG  "${word_SEMI[@]}"
 
 
 # Toggle HIDDEN flag on word.
 function code_HIDDEN {
    ((
       _addr = S[-1] + FLAG_OFFSET ,
-      M[_addr] ^= HIDE_FLAG
+      M[_addr] ^= HIDE_FLAG       , 1
    ))
    unset 'S[-1]'
    NEXT
 }
-def_code  HIDDEN  code_HIDDEN
+def_code  HIDDEN  $NO_FLAG  code_HIDDEN
 
 
 word_HIDE=(
@@ -783,14 +774,14 @@ word_HIDE=(
    ${CACHE[HIDDEN]}
    ${CACHE[EXIT]}
 )
-def_word  'HIDE'  "${word_HIDE[@]}"
+def_word  'HIDE'  $NO_FLAG  "${word_HIDE[@]}"
 
 
 function code_IMMEDIATE {
-   (( M[LATEST + FLAG_OFFSET] ^= IMMD_FLAG ))
+   (( M[LATEST + FLAG_OFFSET] ^= IMMD_FLAG , 1 ))
    NEXT
 }
-def_code  'IMMEDIATE'  code_IMMEDIATE  "$IMMD_FLAG"
+def_code  'IMMEDIATE'  $IMMD_FLAG  code_IMMEDIATE
 
 
 # This should work. HIDE works, and it's pretty much the same thing.
@@ -801,7 +792,7 @@ word_TICK=(
    ${CACHE[FIND]}
    ${CACHE[EXIT]}
 )
-def_word  "'"  "${word_TICK[@]}"
+def_word  "'"  $NO_FLAG  "${word_TICK[@]}"
 
 
 #                                    engage
