@@ -1,1 +1,1 @@
-LIT 'COLON'
+' BYE .s

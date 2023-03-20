@@ -1,43 +1,50 @@
 #!/bin/bash
-#
+#-------------------------------------------------------------------------------
 # FORTH in bash ... why do I do these things to myself.
 #-------------------------------------------------------------------------------
-set -e
+# Can't `set -e` here, as so many of the arithmetic tests return 0.
 
 #===============================================================================
 #                                   globals
 #-------------------------------------------------------------------------------
-declare -gA CACHE=()       # { word -> index }
-declare -gA RCACHE=()      # { index -> word } Useful when debugging to print
-                           #                    the name occuring at an index.
+declare -gA  CACHE=()         # { word  -> index }
+declare -gA  RCACHE=()        # { index -> word  } Useful when debugging to print
+                              #                    the name occurring at an index
+declare -gA  PREV_DEFS=()     # { index -> index } word's index to the index of
+                              #                    its past definition.
 
-declare -g  BUFFER=''      # Where the text of WORD is read into
-declare -g  _LINE=''       # String from `read` before split into chars
-declare -ga KEY_BUFFER=()  # Array of single characters from user input
-declare -gi KEY_INDEX=0    # Position in the KEY_BUFFER
+declare -g   _LINE=''         # String from `read` before split into chars
+declare -g   BUFFER=''        # Where the text of WORD is read into
+declare -gi  KEY_INDEX=0      # Position in the KEY_BUFFER
+declare -ga  KEY_BUFFER=()    # Array of single characters from user input
 
-declare -ga M=()           # Word dictionary.
-declare -ga S=()           # Parameter stack. Values.
-declare -ga CS=()          # Call stack, points to MEMORY locations
-declare -gi SP=            # Stack pointer
+declare -ga  S=()             # Parameter stack. Values.
+declare -ga  CS=()            # Call stack, points to MEMORY locations
+declare -gi  SP=              # Stack pointer
+declare -ga  M=( :: )         # Word dictionary. Index of 0 should indicate a
+                              # word was unfound. `::` is an invalid command,
+                              # and won't do catastrophic shit if executed
+                              # accidentally.
 
 #                                  constants
 #-------------------------------------------------------------------------------
-                           # Index of the word's...
-declare -gi _INTR=0        #  interpreter function
-#declare -gi _FLAG=1       #  flag(s)
-declare -gi _DEFS=1        #  beginning of definition word(s)
+# Word offsets.
+declare -gi  FLAG_OFFSET=1    # Flag offset
+declare -gi  DEFS_OFFSET=2    # Beginning of definition word(s)
 
-                           # Flag constants
-declare -gi _IMMD=1        #  immediate
-declare -gi _HIDE=2        #  hidden from `FIND`
+# Flag constants
+declare -gi  IMMD_FLAG=1      # Immediate
+declare -gi  HIDE_FLAG=2      # Hidden from `FIND`
 
-declare -gi STATE=0        # Executing: 0,  compiling: 1
+# State flags
+declare -gi  STATE=0
+declare -gi  EXECUTE_STATE=0
+declare -gi  COMPILE_STATE=1
 
 #                                  debugging
 #-------------------------------------------------------------------------------
 function debug_stack {
-   printf 'S={\n'
+   printf 'STACK {\n'
    for s in "${S[@]}" ; do
       printf '   %3q\n'  "$s"
    done
@@ -45,7 +52,7 @@ function debug_stack {
 }
 
 
-function debug_cstack {
+function debug_call_stack {
    tput bold
    printf 'CS'
    tput sgr0
@@ -54,8 +61,7 @@ function debug_cstack {
    printf '%10s   %s%25s\n'  'addr'  'value'  'dict word'
    tput sgr0
 
-   len=$(( ${#CS[@]} - 1 ))
-   for (( i=len; i>=0; --i )) ; do
+   for (( i=${#CS[@]}-1 ; i>=0 ; --i )) ; do
       _i="${CS[i]}"
       printf '%8s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[${M[_i]}]}"
    done
@@ -82,6 +88,16 @@ function debug_memory {
    printf '\n'
 }
 
+
+function debug_cache {
+   printf 'CACHE {\n'
+   {  for i in "${!CACHE[@]}" ; do
+         printf '   %4d  <-  %s\n'  "${CACHE[$i]}"  "$i"
+      done
+   } | sort -n
+   printf '}\n\n'
+}
+
 #
 #-------------------------------------------------------------------------------
 # @arg   $1    :str     Word name
@@ -89,41 +105,61 @@ function debug_memory {
 # @arg   $3    :int     Flag
 function def_code {
    LATEST=${#M[@]}
-   M+=( "$2" )
-   CACHE["$1"]="$LATEST"
+   M+=( "$2"  "${3:-0}" )
+
+   # Tracks previous definitions for the same word. If the word 'DOUBLE' is
+   # already defined at M[10], and now at M[20], PREV_DEFS looks like:
+   # { 20 -> 10,  10 -> '' }.
+   # 
+   # Allows for searching past definitions when a later one is marked as HIDDEN.
+   # Follow the links back to
+   #  (1)   an empty string
+   #  (2)   a non-hidden word
+   #
+   PREV_DEFS["$LATEST"]="${CACHE[$1]}"
+
+   CACHE[$1]="$LATEST"
    RCACHE["$LATEST"]="$1"
 }
 
 
 function def_word {
-   LATEST=${#M[@]}
-   CACHE["$1"]="$LATEST"
-   RCACHE["$LATEST"]="$1"
+   local name="$1"
+   local -i flag="${2:-0}"
+   shift ; shift
 
-   shift
-   M+=( 'DOCOL'  "$@" )
+   LATEST=${#M[@]}
+   CACHE["$name"]="$LATEST"
+   RCACHE["$LATEST"]="$name"
+
+   M+=( 'DOCOL'  "$flag"  "$@" )
 }
 
 
 function NEXT {
-   echo "${M[M[CS[-1]]]}"
    ${M[ SP=M[CS[-1]++] ]}
 }
 
 
 function DOCOL {
-   CS+=( $((SP += _DEFS)) )
+   CS+=( $((SP += DEFS_OFFSET)) )
    NEXT
 }
 
 
-function EXIT {
+function code_EXIT {
    unset 'CS[-1]'
    NEXT
 }
+def_code  EXIT  code_EXIT
+
 
 #                               forth primitives
 #-------------------------------------------------------------------------------
+function code_BYE { exit 0 ;}
+def_code  BYE  code_BYE
+
+
 function code_DROP {
    unset 'S[-1]'
    NEXT
@@ -411,7 +447,7 @@ function code_SUBSTORE {
    unset 'S[-1]' 'S[-2]'
    NEXT
 }
-def_code  '+!'  code_SUBSTORE
+def_code  '-!'  code_SUBSTORE
 
 
 # This does more in real FORTH, in which it pushes the header (link, name len,
@@ -441,7 +477,7 @@ function code_COMMA {
    unset 'S[-1]'
    NEXT
 }
-def_code  COMMA  code_COMMA
+def_code  ','  code_COMMA
 
 #                                 return stack
 #-------------------------------------------------------------------------------
@@ -474,13 +510,13 @@ def_code  'RDROP'  code_RDROP
 #   NEXT
 #}
 #def_code  'STATE'  code_STATE
-#
-#
-#function code_LATEST {
-#   S+=( "$LATEST" )
-#   NEXT
-#}
-#def_code  'LATEST'  code_LATEST
+
+
+function code_LATEST {
+   S+=( "$LATEST" )
+   NEXT
+}
+def_code  'LATEST'  code_LATEST
 
 ##                                  constants
 ##-------------------------------------------------------------------------------
@@ -488,24 +524,55 @@ def_code  'RDROP'  code_RDROP
 #   S+=( "$_IMMD" )
 #   NEXT
 #}
-#def_code  'F_IMMD'  code_IMMD
+#def_code  'IMMD_FLAG'  code_IMMD
 #
 #
 #function code_HIDE {
 #   S+=( "$_HIDE" )
 #   NEXT
 #}
-#def_code  'F_HIDE'  code_HIDE
+#def_code  'HIDE_FLAG'  code_HIDE
 
 #                                     I/O
 #-------------------------------------------------------------------------------
-function code_BYE { exit 0 ;}
-def_code  BYE  code_BYE
+function code_dot {
+   printf '%s\n'  "${S[-1]}"
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '.'  code_dot
+
+
+function code_dot_s { debug_stack  ; NEXT ;}
+def_code  '.s'  code_dot_s
+
+function code_dot_m { debug_memory ; NEXT ;}
+def_code  '.m'  code_dot_m
+
+function code_dot_c { debug_cache  ; NEXT ;}
+def_code  '.c'  code_dot_c
+
+
+function code_dot_cache {
+   printf '%s\n'  "${CACHE[${S[-1]}]}"
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '.cache'  code_dot_cache
+
+
+function code_dot_rcache {
+   printf '%s\n'  "${RCACHE[${S[-1]}]}"
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '.rcache'  code_dot_rcache
 
 
 function code_EMIT {
    printf '%s'  "${S[-1]}"
    unset 'S[-1]'
+   NEXT
 }
 def_code  EMIT  code_EMIT
 
@@ -539,10 +606,6 @@ function code_KEY {
 def_code  KEY  code_KEY
 
 
-# WORD()
-# @description
-#  Calls `KEY` until building a sequence of non-space characters.
-#  
 function code_WORD {
    BUFFER=''
 
@@ -567,7 +630,9 @@ function code_WORD {
    unset 'S[-1]'  #<-- whitespace after word
 
    S+=( "$BUFFER" )
-   [[ $1 ]] || NEXT
+   if [[ ! $1 ]] ; then
+      NEXT
+   fi
 }
 def_code  WORD  code_WORD
 
@@ -595,10 +660,19 @@ def_code  NUMBER  code_NUMBER
 
 
 function code_FIND {
-   _addr="${CACHE[${S[-1]}]}" 
+   _addr=${CACHE[${S[-1]}]}
    unset 'S[-1]'
 
-   S+=( "${_addr:- -1}" )
+   # Some trickery here. Assigning `_addr` to itself sets to `0' if unset. Don't
+   # need early return above this, or explicitly setting to `0' if unfound.
+   while ((
+      _addr = _addr ,
+      _hide = M[_addr + FLAG_OFFSET] & HIDE_FLAG
+   )) ; do 
+      _addr=${PREV_DEFS[$_addr]}
+   done
+
+   S+=( "$_addr" )
    if [[ ! $1 ]] ; then
       NEXT
    fi
@@ -614,18 +688,37 @@ def_code  BRANCH  code_BRANCH
 
 #                              interpreter words
 #-------------------------------------------------------------------------------
-function code_INTERPRET {
-   code_WORD 'no_next'
-   code_FIND 'no_next' 
-
-   if (( S[-1] == -1 )) ; then
-      echo "no: $BUFFER"
-      exit 1
-   fi
-
+function _exe_word {
    SP=${S[-1]}
    unset 'S[-1]'
    ${M[SP]}
+}
+
+function _push_number {
+   S[-1]="${_word}"
+   code_NUMBER 'no_next'
+
+   # Not a number, it's a terrible failure.
+   if (( ! S[-1] )) ; then
+      printf "no: ${BUFFER}\n"  1>&2
+      exit 1
+   fi
+
+   unset 'S[-1]'  # pop the `true` flag
+   NEXT
+}
+ 
+function code_INTERPRET {
+   code_WORD 'no_next' ; local _word="${S[-1]}"
+   code_FIND 'no_next' 
+
+   if (( S[-1] )) ; then
+      # It's a word.
+      _exe_word "$_word"
+   else
+      # Not a word, it's a number?
+      _push_number
+   fi
 }
 def_code  INTERPRET  code_INTERPRET
 
@@ -641,33 +734,85 @@ def_word  'QUIT'  "${word_QUIT[@]}"
 
 
 function code_RBRAC {
-   (( STATE = 0 ))
+   (( STATE = EXECUTE_STATE ))
    NEXT
 }
 def_code  '['  code_RBRAC
 
 
 function code_LBRAC {
-   (( STATE = 1 ))
+   (( STATE = COMPILE_STATE ))
    NEXT
 }
-def_code  ']'  code_LBRAC  "$_IMMD"
+def_code  ']'  code_LBRAC  "$IMMD_FLAG"
 
 
 word_COLON=(
-   ${CACHE[WORD]}
-   ${CACHE[CREATE]}
-   #${CACHE[LIT]}     'DOCOL'
-   <-- need to call the address of EXIT but
-       it doesn't have an associated word
+   ${CACHE[WORD]}    ${CACHE[CREATE]}
+   ${CACHE[LIT]}     'DOCOL'
+   ${CACHE[LATEST]}  ${CACHE[HIDDEN]}
+   ${CACHE[']']}
+   ${CACHE[EXIT]}
 )
 def_word  ':'  "${word_COLON[@]}"
 
+
+word_SEMI=(
+   ${CACHE[LIT]}     ${CACHE[EXIT]}    ${CACHE[COMMA]}
+   ${CACHE[LATEST]}  ${CACHE[HIDDEN]}
+   ${CACHE[']']}
+   ${CACHE[EXIT]}
+)
+def_word  ';'  "${word_SEMI[@]}"
+
+
+# Toggle HIDDEN flag on word.
+function code_HIDDEN {
+   ((
+      _addr = S[-1] + FLAG_OFFSET ,
+      M[_addr] ^= HIDE_FLAG
+   ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  HIDDEN  code_HIDDEN
+
+
+word_HIDE=(
+   ${CACHE[WORD]}    ${CACHE[FIND]}
+   ${CACHE[HIDDEN]}
+   ${CACHE[EXIT]}
+)
+def_word  'HIDE'  "${word_HIDE[@]}"
+
+
+function code_IMMEDIATE {
+   (( M[LATEST + FLAG_OFFSET] ^= IMMD_FLAG ))
+   NEXT
+}
+def_code  'IMMEDIATE'  code_IMMEDIATE  "$IMMD_FLAG"
+
+
+# This should work. HIDE works, and it's pretty much the same thing.
+# ...
+# Wait, HIDE doesn't work any more. I dunno what's happened.
+word_TICK=(
+   ${CACHE[WORD]}
+   ${CACHE[FIND]}
+   ${CACHE[EXIT]}
+)
+def_word  "'"  "${word_TICK[@]}"
+
+
 #                                    engage
 #-------------------------------------------------------------------------------
-debug_memory
-
-#set -x
+while (( $# )) ; do
+   case "$1" in
+      -x)   set -x       ;;
+      -m)   debug_memory ;;
+   esac
+   shift
+done
 
 SP=${CACHE[QUIT]}
 ${M[SP]}
