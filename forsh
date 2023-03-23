@@ -4,11 +4,6 @@
 #-------------------------------------------------------------------------------
 set -e
 
-
-# `def_word` is putting the flags AFTER the codewords. Both `def_` functions
-# should have arg format:  $WORD  $FLAG  $DEF(s)
-
-
 #===============================================================================
 #                                   globals
 #-------------------------------------------------------------------------------
@@ -323,7 +318,7 @@ function code_GT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '>'  $NO_FLAG  code_L
+def_code  '>'  $NO_FLAG  code_GT
 
 
 function code_LE {
@@ -331,7 +326,7 @@ function code_LE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '<='  $NO_FLAG  code_L
+def_code  '<='  $NO_FLAG  code_LE
 
 
 function code_GE {
@@ -339,7 +334,7 @@ function code_GE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '>='  $NO_FLAG  code_L
+def_code  '>='  $NO_FLAG  code_GE
 
 
 function code_ZEQ {
@@ -371,7 +366,7 @@ function code_ZGT {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0>'  $NO_FLAG  code_ZL
+def_code  '0>'  $NO_FLAG  code_ZGT
 
 
 function code_ZLE {
@@ -379,7 +374,7 @@ function code_ZLE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0<='  $NO_FLAG  code_ZL
+def_code  '0<='  $NO_FLAG  code_ZLE
 
 
 function code_ZGE {
@@ -387,7 +382,7 @@ function code_ZGE {
    unset 'S[-1]'
    NEXT
 }
-def_code  '0>='  $NO_FLAG  code_ZL
+def_code  '0>='  $NO_FLAG  code_ZGE
 
 
 function code_AND {
@@ -710,6 +705,42 @@ function code_INTERPRET {
       # Not a word, it's a number?
       _push_number
    fi
+
+   ## TODO:
+   # Gotta think through.
+   #  Either have something that resolves to an SP, or a literal number.
+   #  Result is either
+   #     executed (if SP)                 EXECUTE
+   #     pushed to stack (if literal)     EXECUTE
+   #     pushed to memory (both cases)    COMPILE
+   #
+   #  Order is...
+   #     Is word in dict?
+   #        Y: is IMMEDIATE?
+   #              Y: _exe_word()
+   #              N: is COMPILE_STATE?
+   #                    Y: append to current dictionary def (_COMMA)
+   #                    N: _exe_word()
+   #        N: 
+   #
+   # Execute words when:
+   #     (( IMMD_FLAG || EXECUTE_STATE ))
+   #
+   # Push numbers to stack when:
+   #     EXECUTE_STATE
+   #
+   # Push numbers to memory when:
+   #     COMPILE_STATE
+   #
+   # Finally push words to stack.
+   #
+   #
+   # If 
+
+   case $STATE in
+      $EXECUTE_STATE) ;;
+      $COMPILE_STATE) ;;
+   esac
 }
 def_code  INTERPRET  $NO_FLAG  code_INTERPRET
 
@@ -784,9 +815,6 @@ function code_IMMEDIATE {
 def_code  'IMMEDIATE'  $IMMD_FLAG  code_IMMEDIATE
 
 
-# This should work. HIDE works, and it's pretty much the same thing.
-# ...
-# Wait, HIDE doesn't work any more. I dunno what's happened.
 word_TICK=(
    ${CACHE[WORD]}
    ${CACHE[FIND]}
@@ -797,6 +825,10 @@ def_word  "'"  $NO_FLAG  "${word_TICK[@]}"
 
 #                                    engage
 #-------------------------------------------------------------------------------
+if [[ ! $0 == "${BASH_SOURCE[0]}" ]] ; then
+   return
+fi
+
 while (( $# )) ; do
    case "$1" in
       -x)   set -x       ;;
