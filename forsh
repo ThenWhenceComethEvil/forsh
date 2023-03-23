@@ -2,7 +2,11 @@
 #-------------------------------------------------------------------------------
 # FORTH in bash ... why do I do these things to myself.
 #-------------------------------------------------------------------------------
-set -e
+#set -e
+# ^-- unfortunately this requires all arithmetic tests to have a `, 1` at the
+# end, or evaluating to 0 immediately exits. Would rather have better control
+# over when & how to exit, but it adds a lot of overhead. Extra function call
+# everywhere to check stack size.
 
 #===============================================================================
 #                                   globals
@@ -137,6 +141,14 @@ function def_word {
 }
 
 
+function needs {
+   if (( ${#S[@]} < $1 )) ; then
+      printf 'Stack underflow, expected %d parameter(s).\n'  "$1"
+      exit 1
+   fi
+}
+
+
 function NEXT {
    ${M[ SP=M[CS[-1]++] ]}
 }
@@ -162,6 +174,7 @@ def_code  BYE  $NO_FLAG  code_BYE
 
 
 function code_DROP {
+   needs 1
    unset 'S[-1]'
    NEXT
 }
@@ -169,6 +182,7 @@ def_code  DROP  $NO_FLAG  code_DROP
 
 
 function code_SWAP {
+   needs 2
    S+=( "${S[-2]}" )
    unset 'S[-3]'
    NEXT
@@ -177,6 +191,7 @@ def_code  SWAP  $NO_FLAG  code_SWAP
 
 
 function code_DUP {
+   needs 1
    S+=( "${S[-1]}" )
    NEXT
 }
@@ -184,6 +199,7 @@ def_code  DUP  $NO_FLAG  code_DUP
 
 
 function code_OVER {
+   needs 2
    S+=( "${S[-2]}" )
    NEXT
 }
@@ -191,6 +207,7 @@ def_code  OVER  $NO_FLAG  code_OVER
 
 
 function code_ROT {
+   needs 3
    _a="${S[-1]}"
    _b="${S[-2]}"
    _c="${S[-3]}"
@@ -202,6 +219,7 @@ def_code  ROT  $NO_FLAG  code_ROT
 
 
 function code_NROT {
+   needs 3
    _a="${S[-1]}"
    _b="${S[-2]}"
    _c="${S[-3]}"
@@ -213,6 +231,7 @@ def_code  '-ROT'  $NO_FLAG  code_NROT
 
 
 function code_2DROP {
+   needs 2
    unset 'S[-2]' 'S[-1]'
    NEXT
 }
@@ -220,6 +239,7 @@ def_code  2DROP  $NO_FLAG  code_2DROP
 
 
 function code_2DUP {
+   needs 2
    S+=( "${S[-2]}"  "${S[-1]}" )
    NEXT
 }
@@ -227,6 +247,7 @@ def_code  2DUP  $NO_FLAG  code_2DUP
 
 
 function code_2SWAP {
+   needs 4
    S+=( "${S[-4]}"  "${S[-3]}" )
    unset 'S[-6]' 'S[-5]'
    NEXT
@@ -235,6 +256,7 @@ def_code  2SWAP  $NO_FLAG  code_2SWAP
 
 
 function code_ques_DUP {
+   needs 1
    if (( S[-1] )) ; then
       S+=( "${S[-1]}" )
    fi
@@ -244,6 +266,7 @@ def_code  ?DUP  $NO_FLAG  code_ques_DUP
 
 
 function code_INCR {
+   needs 1
    (( ++S[-1] ))
    NEXT
 }
@@ -251,6 +274,7 @@ def_code  '++'  $NO_FLAG  code_INCR
 
 
 function code_DECR {
+   needs 1
    (( --S[-1] ))
    NEXT
 }
@@ -258,6 +282,7 @@ def_code  '--'  $NO_FLAG  code_DECR
 
 
 function code_ADD {
+   needs 2
    (( S[-2] += S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -266,6 +291,7 @@ def_code  '+'  $NO_FLAG  code_ADD
 
 
 function code_SUB {
+   needs 2
    (( S[-2] -= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -274,6 +300,7 @@ def_code  '-'  $NO_FLAG  code_SUB
 
 
 function code_MUL {
+   needs 2
    (( S[-2] *= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -282,6 +309,7 @@ def_code  '*'  $NO_FLAG  code_MUL
 
 
 function code_DIV {
+   needs 2
    (( S[-2] /= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -290,6 +318,7 @@ def_code  '/'  $NO_FLAG  code_DIV
 
 
 function code_EQ {
+   needs 2
    (( S[-2] = (S[-2] == S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -298,6 +327,7 @@ def_code  '='  $NO_FLAG  code_EQ
 
 
 function code_NE {
+   needs 2
    (( S[-2] = (S[-2] != S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -306,6 +336,7 @@ def_code  '!='  $NO_FLAG  code_NE
 
 
 function code_LT {
+   needs 2
    (( S[-2] = (S[-2] < S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -314,6 +345,7 @@ def_code  '<'  $NO_FLAG  code_LT
 
 
 function code_GT {
+   needs 2
    (( S[-2] = (S[-2] > S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -322,6 +354,7 @@ def_code  '>'  $NO_FLAG  code_GT
 
 
 function code_LE {
+   needs 2
    (( S[-2] = (S[-2] <= S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -330,6 +363,7 @@ def_code  '<='  $NO_FLAG  code_LE
 
 
 function code_GE {
+   needs 2
    (( S[-2] = (S[-2] >= S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -338,78 +372,84 @@ def_code  '>='  $NO_FLAG  code_GE
 
 
 function code_ZEQ {
+   needs 1
    (( S[-1] = (S[-1] == 0) ))
-   unset 'S[-1]'
    NEXT
 }
 def_code  '0='  $NO_FLAG  code_ZEQ
 
 
 function code_ZNE {
+   needs 1
    (( S[-1] = (S[-1] != 0) ))
-   unset 'S[-1]'
    NEXT
 }
 def_code  '0!'  $NO_FLAG  code_ZNE
 
 
 function code_ZLT {
+   needs 1
    (( S[-1] = (S[-1] < 0) ))
-   unset 'S[-1]'
    NEXT
 }
 def_code  '0<'  $NO_FLAG  code_ZLT
 
 
 function code_ZGT {
+   needs 1
    (( S[-1] = (S[-1] > 0) ))
-   unset 'S[-1]'
    NEXT
 }
 def_code  '0>'  $NO_FLAG  code_ZGT
 
 
 function code_ZLE {
+   needs 1
    (( S[-1] = (S[-1] <= 0) ))
-   unset 'S[-1]'
    NEXT
 }
 def_code  '0<='  $NO_FLAG  code_ZLE
 
 
 function code_ZGE {
+   needs 1
    (( S[-1] = (S[-1] >= 0) ))
    unset 'S[-1]'
    NEXT
 }
 def_code  '0>='  $NO_FLAG  code_ZGE
 
-
-function code_AND {
+#                              bitwise operators
+#-------------------------------------------------------------------------------
+function code_BIT_AND {
+   needs 2
    (( S[-1] &= S[-2] ))
-   unset 'S[-1]'
+   unset 'S[-2]'
    NEXT
 }
-def_code  AND  $NO_FLAG  code_AND
+def_code  '&'  $NO_FLAG  code_BIT_AND
 
 
-function code_OR {
-   (( S[-1] |= S[-2] ))
-   unset 'S[-1]'
+function code_BIT_OR {
+   needs 2
+    (( S[-1] |= S[-2] ))
+   unset 'S[-2]'
    NEXT
 }
-def_code  OR  $NO_FLAG  code_OR
+def_code  '|'  $NO_FLAG  code_BIT_OR
 
 
-function code_XOR {
+function code_BIT_XOR {
+   needs 2
    (( S[-1] ^= S[-2] ))
-   unset 'S[-1]'
+   unset 'S[-2]'
    NEXT
 }
-def_code  XOR  $NO_FLAG  code_XOR
+def_code  '^'  $NO_FLAG  code_BIT_XOR
 
 
 function code_NOT {
+   needs 2
    (( S[-1] = !S[-1] ))
    NEXT
 }
@@ -420,6 +460,7 @@ def_code  NOT  $NO_FLAG  code_NOT
 # I don't know if these are necessary yet. May want to change these into
 # modifying a global VARIABLES{} assoc. array.
 function code_STORE {
+   needs 2
    (( M[S[-1]] = M[S[-2]] ))
    unset 'S[-2]' 'S[-1]'
    NEXT
@@ -428,6 +469,7 @@ def_code  '!'  $NO_FLAG  code_STORE
 
 
 function code_FETCH {
+   needs 1
    S+=( "${M[S[-1]]}" )
    unset 'S[-1]'
    NEXT
@@ -436,6 +478,7 @@ def_code  '@'  $NO_FLAG  code_FETCH
 
 
 function code_ADDSTORE {
+   needs 2
    (( M[S[-1]] += S[-2] ))
    unset 'S[-1]' 'S[-2]'
    NEXT
@@ -444,6 +487,7 @@ def_code  '+!'  $NO_FLAG  code_ADDSTORE
 
 
 function code_SUBSTORE {
+   needs 2
    (( M[S[-1]] += S[-2] ))
    unset 'S[-1]' 'S[-2]'
    NEXT
@@ -464,6 +508,7 @@ def_code  '-!'  $NO_FLAG  code_SUBSTORE
 #  2. Creates CACHE entry of $1 -> $LATEST
 #
 function code_CREATE {
+   needs 1
    LATEST=${#M[@]}
    CACHE["${S[-1]}"]="$LATEST"
    unset 'S[-1]'
@@ -474,6 +519,7 @@ def_code  CREATE  $NO_FLAG  code_CREATE
 
 # Unsure how this translates right now. Just pushes int to memory?
 function code_COMMA {
+   needs 1
    M+=( "${S[-1]}" )
    unset 'S[-1]'
    NEXT
@@ -482,27 +528,30 @@ def_code  ','  $NO_FLAG  code_COMMA
 
 #                                 return stack
 #-------------------------------------------------------------------------------
-function code_TOR {
+function code_TO_R {
+   needs 1
    CS+=( "${S[-1]}" )
    unset 'S[-1]'
    NEXT
 }
-def_code  '>R'  $NO_FLAG  code_TOR
+def_code  '>R'  $NO_FLAG  code_TO_R
 
 
-function code_FROMR {
+function code_FROM_R {
+   needs 1
    S+=( "${CS[-1]}" )
    unset 'CS[-1]'
    NEXT
 }
-def_code  'R>'  $NO_FLAG  code_FROMR
+def_code  'R>'  $NO_FLAG  code_FROM_R
 
 
-function code_RDROP {
+function code_R_DROP {
+   needs 1
    unset 'CS[-1]'
    NEXT
 }
-def_code  'RDROP'  $NO_FLAG  code_RDROP
+def_code  'RDROP'  $NO_FLAG  code_R_DROP
 
 ##                                  variables
 ##-------------------------------------------------------------------------------
@@ -522,6 +571,7 @@ def_code  'LATEST'  $NO_FLAG  code_LATEST
 #                                     I/O
 #-------------------------------------------------------------------------------
 function code_dot {
+   needs 1
    printf '%s\n'  "${S[-1]}"
    unset 'S[-1]'
    NEXT
@@ -540,6 +590,7 @@ def_code  '.c'  $NO_FLAG  code_dot_c
 
 
 function code_dot_cache {
+   needs 1
    printf '%s\n'  "${CACHE[${S[-1]}]}"
    unset 'S[-1]'
    NEXT
@@ -548,6 +599,7 @@ def_code  '.cache'  $NO_FLAG  code_dot_cache
 
 
 function code_dot_rcache {
+   needs 1
    printf '%s\n'  "${RCACHE[${S[-1]}]}"
    unset 'S[-1]'
    NEXT
@@ -556,6 +608,7 @@ def_code  '.rcache'  $NO_FLAG  code_dot_rcache
 
 
 function code_EMIT {
+   needs 1
    printf '%s'  "${S[-1]}"
    unset 'S[-1]'
    NEXT
@@ -667,7 +720,7 @@ def_code  FIND  $NO_FLAG  code_FIND
 
 
 function code_BRANCH {
-   (( CS[-1] += M[CS[-1]] , 1 ))
+   (( CS[-1] += M[CS[-1]] ))
    NEXT
 }
 def_code  BRANCH  $NO_FLAG  code_BRANCH
@@ -756,14 +809,14 @@ def_word  'QUIT'  $NO_FLAG  "${word_QUIT[@]}"
 
 
 function code_RBRAC {
-   (( STATE = EXECUTE_STATE , 1 ))
+   (( STATE = EXECUTE_STATE ))
    NEXT
 }
 def_code  '['  $NO_FLAG  code_RBRAC
 
 
 function code_LBRAC {
-   (( STATE = COMPILE_STATE , 1 ))
+   (( STATE = COMPILE_STATE ))
    NEXT
 }
 def_code  ']'  $IMMD_FLAG  code_LBRAC
@@ -790,9 +843,10 @@ def_word  ';'  $NO_FLAG  "${word_SEMI[@]}"
 
 # Toggle HIDDEN flag on word.
 function code_HIDDEN {
+   needs 1
    ((
       _addr = S[-1] + FLAG_OFFSET ,
-      M[_addr] ^= HIDE_FLAG       , 1
+      M[_addr] ^= HIDE_FLAG
    ))
    unset 'S[-1]'
    NEXT
@@ -809,7 +863,7 @@ def_word  'HIDE'  $NO_FLAG  "${word_HIDE[@]}"
 
 
 function code_IMMEDIATE {
-   (( M[LATEST + FLAG_OFFSET] ^= IMMD_FLAG , 1 ))
+   (( M[LATEST + FLAG_OFFSET] ^= IMMD_FLAG ))
    NEXT
 }
 def_code  'IMMEDIATE'  $IMMD_FLAG  code_IMMEDIATE
