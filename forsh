@@ -566,40 +566,67 @@ function code_LATEST_VAR {
 def_code  'LATEST-VAR'  $NO_FLAG  code_LATEST_VAR
 
 
-#function code_STORE {
-#   assert_stack 2
-#   (( M[S[-1]] = M[S[-2]] ))
-#   unset 'S[-2]' 'S[-1]'
-#   NEXT
-#}
-#def_code  '<-'  $NO_FLAG  code_STORE
+function code_STORE {
+   assert_stack 2
+
+   local -n __ref__="${S[-1]}"
+   local value="${S[-2]}"
+   __ref__="$value"
+
+   unset 'S[-2]' 'S[-1]'
+   NEXT
+}
+def_code  '<-'  $NO_FLAG  code_STORE
 
 
-#function code_FETCH {
-#   assert_stack 1
-#   S+=( "${M[S[-1]]}" )
-#   unset 'S[-1]'
-#   NEXT
-#}
-#def_code  '@'  $NO_FLAG  code_FETCH
+function code_FETCH {
+   assert_stack 1
+   local -n __ref__="${S[-1]}"
+   unset 'S[-1]'
+   S+=( "${__ref__}" )
+   NEXT
+}
+def_code  '->'  $NO_FLAG  code_FETCH
 
 
-#function code_ADDSTORE {
-#   assert_stack 2
-#   (( M[S[-1]] += S[-2] ))
-#   unset 'S[-1]' 'S[-2]'
-#   NEXT
-#}
-#def_code  '+!'  $NO_FLAG  code_ADDSTORE
+function code_ADDSTORE {
+   assert_stack 2
+   local -n __ref__="${S[-1]}"
+   (( __ref__ += S[-2] ))
+   unset 'S[-2]' 'S[-1]'
+   NEXT
+}
+def_code  '+<-'  $NO_FLAG  code_ADDSTORE
 
 
-#function code_SUBSTORE {
-#   assert_stack 2
-#   (( M[S[-1]] += S[-2] ))
-#   unset 'S[-1]' 'S[-2]'
-#   NEXT
-#}
-#def_code  '-!'  $NO_FLAG  code_SUBSTORE
+function code_SUBSTORE {
+   assert_stack 2
+   local -n __ref__="${S[-1]}"
+   (( __ref__ -= S[-2] ))
+   unset 'S[-2]' 'S[-1]'
+   NEXT
+}
+def_code  '-<-'  $NO_FLAG  code_SUBSTORE
+
+
+function code_DECSTORE {
+   assert_stack 1
+   local -n __ref__="${S[-1]}"
+   (( -- __ref__ ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '--<-'  $NO_FLAG  code_DECSTORE
+
+
+function code_INCSTORE {
+   assert_stack 1
+   local -n __ref__="${S[-1]}"
+   (( ++ __ref__ ))
+   unset 'S[-1]'
+   NEXT
+}
+def_code  '++<-'  $NO_FLAG  code_INCSTORE
 
 #                                     I/O
 #-------------------------------------------------------------------------------

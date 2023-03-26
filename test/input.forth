@@ -1,2 +1,4 @@
 VARIABLE this
-.m
+10 this <-
+this ++<-
+this -> .
