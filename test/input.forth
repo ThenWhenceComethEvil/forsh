@@ -1,1 +1,2 @@
-' BYE .s
+VARIABLE this
+.m

@@ -24,11 +24,16 @@ declare -ga  KEY_BUFFER=()    # Array of single characters from user input
 
 declare -ga  S=()             # Parameter stack. Values.
 declare -ga  CS=()            # Call stack, points to MEMORY locations
-declare -gi  SP=              # Stack pointer
+declare -gi  SP=0             # Stack pointer
 declare -ga  M=( :: )         # Word dictionary. Index of 0 should indicate a
                               # word was unfound. `::` is an invalid command,
                               # and won't do catastrophic shit if executed
                               # accidentally.
+declare -gA  V=()             # User-defined variables.
+declare -gi  _VAR_NUM=0
+
+declare -g   LATEST=          # Index of most recently defined word
+declare -g   LATEST_VAR=      # Name (_VAR_$n) of most recently defined variable
 
 #                                  constants
 #-------------------------------------------------------------------------------
@@ -51,7 +56,7 @@ declare -gi  COMPILE_STATE=1
 function debug_stack {
    printf 'STACK {\n'
    for s in "${S[@]}" ; do
-      printf '   %3q\n'  "$s"
+      printf '|  %q\n'  "$s"
    done
    printf '}\n\n'
 }
@@ -68,7 +73,7 @@ function debug_call_stack {
 
    for (( i=${#CS[@]}-1 ; i>=0 ; --i )) ; do
       _i="${CS[i]}"
-      printf '%8s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[${M[_i]}]}"
+      printf '|%7s%4d   %-21s%s\n'  ''  "$_i"  "${M[_i]}"  "${RCACHE[${M[_i]}]}"
    done
 
    printf '\n'
@@ -87,7 +92,7 @@ function debug_memory {
    for idx in "${!M[@]}" ; do
       value="${M[idx]}"
       word="${RCACHE[$idx]}"
-      printf '%8s%4d.  %-20s %s\n'  ''  "$idx"  "$value"  "$word"
+      printf '|%7s%4d.  %-20s %s\n'  ''  "$idx"  "$value"  "$word"
    done
 
    printf '\n'
@@ -97,20 +102,31 @@ function debug_memory {
 function debug_cache {
    printf 'CACHE {\n'
    {  for i in "${!CACHE[@]}" ; do
-         printf '   %4d  <-  %s\n'  "${CACHE[$i]}"  "$i"
+         printf '|  %4d  <-  %s\n'  "${CACHE[$i]}"  "$i"
       done
    } | sort -n
    printf '}\n\n'
 }
 
+
+function debug_vars {
+   printf 'VARS {\n'
+   {  for i in "${!V[@]}" ; do
+         printf '|  %s\t%s\n'  "$i"  "${V[$i]}"
+      done
+   } | column -t
+   printf '}\n\n'
+}
+
 #
 #-------------------------------------------------------------------------------
-# @arg   $1    :str     Word name
-# @arg   $2    :FLAG    Flag
-# @arg   $3    :str     Interpreter function name
 function def_code {
-   LATEST=${#M[@]}
-   M+=( "$3"  "$2" )
+   LATEST="${#M[@]}"
+
+   local name="$1" ; shift
+   local flag="$1" ; shift
+   local func="$1" ; shift
+   M+=( "$func"  "$flag"  "$@" )
 
    # Tracks previous definitions for the same word. If the word 'DOUBLE' is
    # already defined at M[10], and now at M[20], PREV_DEFS looks like:
@@ -121,30 +137,31 @@ function def_code {
    #  (1)   an empty string
    #  (2)   a non-hidden word
    #
-   PREV_DEFS["$LATEST"]="${CACHE[$1]}"
-
-   CACHE[$1]="$LATEST"
-   RCACHE["$LATEST"]="$1"
+   PREV_DEFS["$LATEST"]="${CACHE[$name]}"
+   CACHE[$name]="$LATEST"
+   RCACHE["$LATEST"]="$name"
 }
 
 
 function def_word {
-   local name="$1"
-   local -i flag="$2"
-   shift ; shift
-
-   LATEST=${#M[@]}
-   CACHE["$name"]="$LATEST"
-   RCACHE["$LATEST"]="$name"
-
-   M+=( 'DOCOL'  "$flag"  "$@" )
+   local name="$1" ; shift
+   local flag="$1" ; shift
+   def_code  "$name"  "$flag"  'DOCOL'  "$@"
 }
 
 
-function needs {
+function assert_stack {
    if (( ${#S[@]} < $1 )) ; then
       printf 'Stack underflow, expected %d parameter(s).\n'  "$1"
       exit 1
+   fi
+}
+
+
+function assert_state {
+   if [[ ! "$STATE" == "$1" ]] ; then
+      printf 'State error, may only be done in: %s.\n'  "$1"
+      exit 2
    fi
 }
 
@@ -174,7 +191,7 @@ def_code  BYE  $NO_FLAG  code_BYE
 
 
 function code_DROP {
-   needs 1
+   assert_stack 1
    unset 'S[-1]'
    NEXT
 }
@@ -182,7 +199,7 @@ def_code  DROP  $NO_FLAG  code_DROP
 
 
 function code_SWAP {
-   needs 2
+   assert_stack 2
    S+=( "${S[-2]}" )
    unset 'S[-3]'
    NEXT
@@ -191,7 +208,7 @@ def_code  SWAP  $NO_FLAG  code_SWAP
 
 
 function code_DUP {
-   needs 1
+   assert_stack 1
    S+=( "${S[-1]}" )
    NEXT
 }
@@ -199,7 +216,7 @@ def_code  DUP  $NO_FLAG  code_DUP
 
 
 function code_OVER {
-   needs 2
+   assert_stack 2
    S+=( "${S[-2]}" )
    NEXT
 }
@@ -207,7 +224,7 @@ def_code  OVER  $NO_FLAG  code_OVER
 
 
 function code_ROT {
-   needs 3
+   assert_stack 3
    _a="${S[-1]}"
    _b="${S[-2]}"
    _c="${S[-3]}"
@@ -219,7 +236,7 @@ def_code  ROT  $NO_FLAG  code_ROT
 
 
 function code_NROT {
-   needs 3
+   assert_stack 3
    _a="${S[-1]}"
    _b="${S[-2]}"
    _c="${S[-3]}"
@@ -231,7 +248,7 @@ def_code  '-ROT'  $NO_FLAG  code_NROT
 
 
 function code_2DROP {
-   needs 2
+   assert_stack 2
    unset 'S[-2]' 'S[-1]'
    NEXT
 }
@@ -239,7 +256,7 @@ def_code  2DROP  $NO_FLAG  code_2DROP
 
 
 function code_2DUP {
-   needs 2
+   assert_stack 2
    S+=( "${S[-2]}"  "${S[-1]}" )
    NEXT
 }
@@ -247,7 +264,7 @@ def_code  2DUP  $NO_FLAG  code_2DUP
 
 
 function code_2SWAP {
-   needs 4
+   assert_stack 4
    S+=( "${S[-4]}"  "${S[-3]}" )
    unset 'S[-6]' 'S[-5]'
    NEXT
@@ -256,7 +273,7 @@ def_code  2SWAP  $NO_FLAG  code_2SWAP
 
 
 function code_ques_DUP {
-   needs 1
+   assert_stack 1
    if (( S[-1] )) ; then
       S+=( "${S[-1]}" )
    fi
@@ -266,7 +283,7 @@ def_code  ?DUP  $NO_FLAG  code_ques_DUP
 
 
 function code_INCR {
-   needs 1
+   assert_stack 1
    (( ++S[-1] ))
    NEXT
 }
@@ -274,7 +291,7 @@ def_code  '++'  $NO_FLAG  code_INCR
 
 
 function code_DECR {
-   needs 1
+   assert_stack 1
    (( --S[-1] ))
    NEXT
 }
@@ -282,7 +299,7 @@ def_code  '--'  $NO_FLAG  code_DECR
 
 
 function code_ADD {
-   needs 2
+   assert_stack 2
    (( S[-2] += S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -291,7 +308,7 @@ def_code  '+'  $NO_FLAG  code_ADD
 
 
 function code_SUB {
-   needs 2
+   assert_stack 2
    (( S[-2] -= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -300,7 +317,7 @@ def_code  '-'  $NO_FLAG  code_SUB
 
 
 function code_MUL {
-   needs 2
+   assert_stack 2
    (( S[-2] *= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -309,7 +326,7 @@ def_code  '*'  $NO_FLAG  code_MUL
 
 
 function code_DIV {
-   needs 2
+   assert_stack 2
    (( S[-2] /= S[-1] ))
    unset 'S[-1]'
    NEXT
@@ -318,7 +335,7 @@ def_code  '/'  $NO_FLAG  code_DIV
 
 
 function code_EQ {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] == S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -327,7 +344,7 @@ def_code  '='  $NO_FLAG  code_EQ
 
 
 function code_NE {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] != S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -336,7 +353,7 @@ def_code  '!='  $NO_FLAG  code_NE
 
 
 function code_LT {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] < S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -345,7 +362,7 @@ def_code  '<'  $NO_FLAG  code_LT
 
 
 function code_GT {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] > S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -354,7 +371,7 @@ def_code  '>'  $NO_FLAG  code_GT
 
 
 function code_LE {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] <= S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -363,7 +380,7 @@ def_code  '<='  $NO_FLAG  code_LE
 
 
 function code_GE {
-   needs 2
+   assert_stack 2
    (( S[-2] = (S[-2] >= S[-1]) ))
    unset 'S[-1]'
    NEXT
@@ -372,7 +389,7 @@ def_code  '>='  $NO_FLAG  code_GE
 
 
 function code_ZEQ {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] == 0) ))
    NEXT
 }
@@ -380,7 +397,7 @@ def_code  '0='  $NO_FLAG  code_ZEQ
 
 
 function code_ZNE {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] != 0) ))
    NEXT
 }
@@ -388,7 +405,7 @@ def_code  '0!'  $NO_FLAG  code_ZNE
 
 
 function code_ZLT {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] < 0) ))
    NEXT
 }
@@ -396,7 +413,7 @@ def_code  '0<'  $NO_FLAG  code_ZLT
 
 
 function code_ZGT {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] > 0) ))
    NEXT
 }
@@ -404,7 +421,7 @@ def_code  '0>'  $NO_FLAG  code_ZGT
 
 
 function code_ZLE {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] <= 0) ))
    NEXT
 }
@@ -412,7 +429,7 @@ def_code  '0<='  $NO_FLAG  code_ZLE
 
 
 function code_ZGE {
-   needs 1
+   assert_stack 1
    (( S[-1] = (S[-1] >= 0) ))
    unset 'S[-1]'
    NEXT
@@ -422,7 +439,7 @@ def_code  '0>='  $NO_FLAG  code_ZGE
 #                              bitwise operators
 #-------------------------------------------------------------------------------
 function code_BIT_AND {
-   needs 2
+   assert_stack 2
    (( S[-1] &= S[-2] ))
    unset 'S[-2]'
    NEXT
@@ -431,7 +448,7 @@ def_code  '&'  $NO_FLAG  code_BIT_AND
 
 
 function code_BIT_OR {
-   needs 2
+   assert_stack 2
     (( S[-1] |= S[-2] ))
    unset 'S[-2]'
    NEXT
@@ -440,7 +457,7 @@ def_code  '|'  $NO_FLAG  code_BIT_OR
 
 
 function code_BIT_XOR {
-   needs 2
+   assert_stack 2
    (( S[-1] ^= S[-2] ))
    unset 'S[-2]'
    NEXT
@@ -448,8 +465,10 @@ function code_BIT_XOR {
 def_code  '^'  $NO_FLAG  code_BIT_XOR
 
 
+# TODO: `!` being the 'store' operator means can't use for bitwise not. Need
+#       bit and logical comparisons.
 function code_NOT {
-   needs 2
+   assert_stack 2
    (( S[-1] = !S[-1] ))
    NEXT
 }
@@ -457,44 +476,6 @@ def_code  NOT  $NO_FLAG  code_NOT
 
 #                              memory management
 #-------------------------------------------------------------------------------
-# I don't know if these are necessary yet. May want to change these into
-# modifying a global VARIABLES{} assoc. array.
-function code_STORE {
-   needs 2
-   (( M[S[-1]] = M[S[-2]] ))
-   unset 'S[-2]' 'S[-1]'
-   NEXT
-}
-def_code  '!'  $NO_FLAG  code_STORE
-
-
-function code_FETCH {
-   needs 1
-   S+=( "${M[S[-1]]}" )
-   unset 'S[-1]'
-   NEXT
-}
-def_code  '@'  $NO_FLAG  code_FETCH
-
-
-function code_ADDSTORE {
-   needs 2
-   (( M[S[-1]] += S[-2] ))
-   unset 'S[-1]' 'S[-2]'
-   NEXT
-}
-def_code  '+!'  $NO_FLAG  code_ADDSTORE
-
-
-function code_SUBSTORE {
-   needs 2
-   (( M[S[-1]] += S[-2] ))
-   unset 'S[-1]' 'S[-2]'
-   NEXT
-}
-def_code  '-!'  $NO_FLAG  code_SUBSTORE
-
-
 # This does more in real FORTH, in which it pushes the header (link, name len,
 # name, and padding to 4-byte boundry), and sets LATEST & HERE.
 #
@@ -508,18 +489,27 @@ def_code  '-!'  $NO_FLAG  code_SUBSTORE
 #  2. Creates CACHE entry of $1 -> $LATEST
 #
 function code_CREATE {
-   needs 1
-   LATEST=${#M[@]}
-   CACHE["${S[-1]}"]="$LATEST"
+   assert_stack 1
+   def_word  "${S[-1]}"  "$NO_FLAG"
    unset 'S[-1]'
    NEXT
 }
 def_code  CREATE  $NO_FLAG  code_CREATE
 
 
+function code_CREATE_VAR {
+   assert_stack 1
+   LATEST_VAR="_VAR_$(( ++_VAR_NUM ))"
+   V[${S[-1]}]="$LATEST_VAR"
+   unset 'S[-1]'
+   NEXT
+}
+def_code  'CREATE-VAR'  $NO_FLAG  code_CREATE_VAR
+
+
 # Unsure how this translates right now. Just pushes int to memory?
 function code_COMMA {
-   needs 1
+   assert_stack 1
    M+=( "${S[-1]}" )
    unset 'S[-1]'
    NEXT
@@ -529,7 +519,7 @@ def_code  ','  $NO_FLAG  code_COMMA
 #                                 return stack
 #-------------------------------------------------------------------------------
 function code_TO_R {
-   needs 1
+   assert_stack 1
    CS+=( "${S[-1]}" )
    unset 'S[-1]'
    NEXT
@@ -538,7 +528,7 @@ def_code  '>R'  $NO_FLAG  code_TO_R
 
 
 function code_FROM_R {
-   needs 1
+   assert_stack 1
    S+=( "${CS[-1]}" )
    unset 'CS[-1]'
    NEXT
@@ -547,7 +537,7 @@ def_code  'R>'  $NO_FLAG  code_FROM_R
 
 
 function code_R_DROP {
-   needs 1
+   assert_stack 1
    unset 'CS[-1]'
    NEXT
 }
@@ -555,11 +545,11 @@ def_code  'RDROP'  $NO_FLAG  code_R_DROP
 
 ##                                  variables
 ##-------------------------------------------------------------------------------
-#function code_STATE {
-#   S+=( "$STATE" )
-#   NEXT
-#}
-#def_code  'STATE'  $NO_FLAG  code_STATE
+function code_STATE {
+   S+=( "$STATE" )
+   NEXT
+}
+def_code  'STATE'  $NO_FLAG  code_STATE
 
 
 function code_LATEST {
@@ -568,10 +558,53 @@ function code_LATEST {
 }
 def_code  'LATEST'  $NO_FLAG  code_LATEST
 
+
+function code_LATEST_VAR {
+   S+=( "$LATEST_VAR" )
+   NEXT
+}
+def_code  'LATEST-VAR'  $NO_FLAG  code_LATEST_VAR
+
+
+#function code_STORE {
+#   assert_stack 2
+#   (( M[S[-1]] = M[S[-2]] ))
+#   unset 'S[-2]' 'S[-1]'
+#   NEXT
+#}
+#def_code  '<-'  $NO_FLAG  code_STORE
+
+
+#function code_FETCH {
+#   assert_stack 1
+#   S+=( "${M[S[-1]]}" )
+#   unset 'S[-1]'
+#   NEXT
+#}
+#def_code  '@'  $NO_FLAG  code_FETCH
+
+
+#function code_ADDSTORE {
+#   assert_stack 2
+#   (( M[S[-1]] += S[-2] ))
+#   unset 'S[-1]' 'S[-2]'
+#   NEXT
+#}
+#def_code  '+!'  $NO_FLAG  code_ADDSTORE
+
+
+#function code_SUBSTORE {
+#   assert_stack 2
+#   (( M[S[-1]] += S[-2] ))
+#   unset 'S[-1]' 'S[-2]'
+#   NEXT
+#}
+#def_code  '-!'  $NO_FLAG  code_SUBSTORE
+
 #                                     I/O
 #-------------------------------------------------------------------------------
 function code_dot {
-   needs 1
+   assert_stack 1
    printf '%s\n'  "${S[-1]}"
    unset 'S[-1]'
    NEXT
@@ -588,9 +621,12 @@ def_code  '.m'  $NO_FLAG  code_dot_m
 function code_dot_c { debug_cache  ; NEXT ;}
 def_code  '.c'  $NO_FLAG  code_dot_c
 
+function code_dot_v { debug_vars   ; NEXT ;}
+def_code  '.v'  $NO_FLAG  code_dot_v
+
 
 function code_dot_cache {
-   needs 1
+   assert_stack 1
    printf '%s\n'  "${CACHE[${S[-1]}]}"
    unset 'S[-1]'
    NEXT
@@ -599,7 +635,7 @@ def_code  '.cache'  $NO_FLAG  code_dot_cache
 
 
 function code_dot_rcache {
-   needs 1
+   assert_stack 1
    printf '%s\n'  "${RCACHE[${S[-1]}]}"
    unset 'S[-1]'
    NEXT
@@ -608,7 +644,7 @@ def_code  '.rcache'  $NO_FLAG  code_dot_rcache
 
 
 function code_EMIT {
-   needs 1
+   assert_stack 1
    printf '%s'  "${S[-1]}"
    unset 'S[-1]'
    NEXT
@@ -673,14 +709,15 @@ function code_WORD {
       NEXT
    fi
 }
-def_code  WORD  $NO_FLAG  code_WORD
+def_code  'WORD'  $NO_FLAG  code_WORD
 
 
+# TODO: `LIT` is broken. Need to see what's up.
 function code_LIT {
-   S+=( "${M[CS[-1]]}" )
+   S+=( "${M[CS[-1]++]}" )
    NEXT
 }
-def_code  LIT  $NO_FLAG  code_LIT
+def_code  'LIT'  $NO_FLAG  code_LIT
 
 
 function code_NUMBER {
@@ -695,7 +732,7 @@ function code_NUMBER {
       NEXT
    fi
 }
-def_code  NUMBER  $NO_FLAG  code_NUMBER
+def_code  'NUMBER'  $NO_FLAG  code_NUMBER
 
 
 function code_FIND {
@@ -716,14 +753,14 @@ function code_FIND {
       NEXT
    fi
 }
-def_code  FIND  $NO_FLAG  code_FIND
+def_code  'FIND'  $NO_FLAG  code_FIND
 
 
 function code_BRANCH {
    (( CS[-1] += M[CS[-1]] ))
    NEXT
 }
-def_code  BRANCH  $NO_FLAG  code_BRANCH
+def_code  'BRANCH'  $NO_FLAG  code_BRANCH
 
 #                              interpreter words
 #-------------------------------------------------------------------------------
@@ -798,16 +835,6 @@ function code_INTERPRET {
 def_code  INTERPRET  $NO_FLAG  code_INTERPRET
 
 
-word_QUIT=(
-   ${CACHE[INTERPRET]}
-   ${CACHE[BRANCH]} -2
-)
-def_word  'QUIT'  $NO_FLAG  "${word_QUIT[@]}"
-# This needs to be called after the `def_code` for INTERPRET & BRANCH, or they
-# won't exist in the CACHE yet. I'm vaguely concerned about circular
-# dependencies, but we'll see if that happens.
-
-
 function code_RBRAC {
    (( STATE = EXECUTE_STATE ))
    NEXT
@@ -820,30 +847,11 @@ function code_LBRAC {
    NEXT
 }
 def_code  ']'  $IMMD_FLAG  code_LBRAC
-
-
-word_COLON=(
-   ${CACHE[WORD]}    ${CACHE[CREATE]}
-   ${CACHE[LIT]}     'DOCOL'
-   ${CACHE[LATEST]}  ${CACHE[HIDDEN]}
-   ${CACHE[']']}
-   ${CACHE[EXIT]}
-)
-def_word  ':'  $NO_FLAG  "${word_COLON[@]}"
-
-
-word_SEMI=(
-   ${CACHE[LIT]}     ${CACHE[EXIT]}    ${CACHE[COMMA]}
-   ${CACHE[LATEST]}  ${CACHE[HIDDEN]}
-   ${CACHE[']']}
-   ${CACHE[EXIT]}
-)
-def_word  ';'  $NO_FLAG  "${word_SEMI[@]}"
-
-
+ 
+ 
 # Toggle HIDDEN flag on word.
 function code_HIDDEN {
-   needs 1
+   assert_stack 1
    ((
       _addr = S[-1] + FLAG_OFFSET ,
       M[_addr] ^= HIDE_FLAG
@@ -851,15 +859,7 @@ function code_HIDDEN {
    unset 'S[-1]'
    NEXT
 }
-def_code  HIDDEN  $NO_FLAG  code_HIDDEN
-
-
-word_HIDE=(
-   ${CACHE[WORD]}    ${CACHE[FIND]}
-   ${CACHE[HIDDEN]}
-   ${CACHE[EXIT]}
-)
-def_word  'HIDE'  $NO_FLAG  "${word_HIDE[@]}"
+def_code  'HIDDEN'  $NO_FLAG  code_HIDDEN
 
 
 function code_IMMEDIATE {
@@ -869,12 +869,76 @@ function code_IMMEDIATE {
 def_code  'IMMEDIATE'  $IMMD_FLAG  code_IMMEDIATE
 
 
+word_COLON=(
+   ${CACHE[WORD]}
+   ${CACHE[CREATE]}
+   ${CACHE[LATEST]}
+   ${CACHE[HIDDEN]}
+   ${CACHE[']']}
+   ${CACHE[EXIT]}
+)
+def_word  ':'  $NO_FLAG  "${word_COLON[@]}"
+
+
+word_SEMI=(
+   ${CACHE[LIT]}
+   ${CACHE[EXIT]}
+   ${CACHE[","]}
+   ${CACHE[LATEST]}
+   ${CACHE[HIDDEN]}
+   ${CACHE[']']}
+   ${CACHE[EXIT]}
+)
+def_word  ';'  $NO_FLAG  "${word_SEMI[@]}"
+
+
+word_HIDE=(
+   ${CACHE[WORD]}
+   ${CACHE[FIND]}
+   ${CACHE[HIDDEN]}
+   ${CACHE[EXIT]}
+)
+def_word  'HIDE'  $NO_FLAG  "${word_HIDE[@]}"
+
+
 word_TICK=(
    ${CACHE[WORD]}
    ${CACHE[FIND]}
    ${CACHE[EXIT]}
 )
 def_word  "'"  $NO_FLAG  "${word_TICK[@]}"
+
+
+word_VARIABLE=(
+   ${CACHE[WORD]}
+   ${CACHE[DUP]}
+   ${CACHE[CREATE-VAR]}
+   ${CACHE[CREATE]}
+
+   # Push `LIT` to M[].
+   ${CACHE[LIT]}
+   ${CACHE[LIT]}
+   ${CACHE[","]}
+
+   # Push _VAR_$n to M[].
+   ${CACHE[LATEST-VAR]}
+   ${CACHE[","]}
+
+   # Push `EXIT` to M[].
+   ${CACHE[LIT]}
+   ${CACHE[EXIT]}
+   ${CACHE[","]}
+
+   ${CACHE[EXIT]}
+)
+def_word  'VARIABLE'  $NO_FLAG  "${word_VARIABLE[@]}"
+
+
+word_QUIT=(
+   ${CACHE[INTERPRET]}
+   ${CACHE[BRANCH]} -2
+)
+def_word  'QUIT'  $NO_FLAG  "${word_QUIT[@]}"
 
 
 #                                    engage

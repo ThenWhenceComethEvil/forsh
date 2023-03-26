@@ -2,3 +2,188 @@
 #===============================================================================
 #                                   THINKIES
 #-------------------------------------------------------------------------------
+
+Variable thinkies.
+
+Declaring a variable gives an index into VARIABLES[]. Strings & integers can be
+stored directly. Arrays have a _VAR_$n pointer that must be nameref'd. Needs
+different get/set operations.
+
+Can unify things. Make everything indirect.
+
+VARIABLES {
+| _VAR_0       ` declare -- _VAR_1="this is a string" `
+| _VAR_1       ` declare -i _VAR_2="v0.0.1"           `
+| _VAR_2       ` declare -a _VAR_3=( ... )            `
+| _VAR_3       ` declare -A _VAR_3=( ... )            `
+}
+
+E.g., `VERSION` would push `1` to the stack. Works similar way to .asm. Give
+an address and value.
+
+Requires word to create new variables to push to VARIABLES[] array.
+
+
+Other method would be either a dict, or array. Both works similarly. Strings
+stored directly, pointers to arrays:
+
+VARIABLES [
+|  "this is a string"
+|  "v.0.0.1"
+|  _VAR_0
+|  _VAR_1
+]
+
+Also would push an index, though requires special handling of arrays to nameref.
+Similar for this:
+
+VARIABLES {
+   'SENTENCE' -> "this is a string"
+   'VERSION'  -> "v.0.0.1"
+   'ITEMS'    -> _VAR_0
+   'DICT'     -> _VAR_1
+}
+
+
+Think it's worth trying both the dict, and first array option. First option
+is closest to how it's handled in .asm, but feels weird when working in bash
+from user perspective.
+
+Needing to nameref is also kinda weird ergonomics for the user, but more
+consistent to normal bash things. Ideally can abstract that away via whatever
+words operate on arrays/dicts.
+
+I think the dict needs words to both set & update vars. The array approach does
+not.
+
+ARRAY, homogeneous
+
+>  VARIABLE name       \ VARIABLES[ _VAR_1 ], STACK{ 0 }
+>  ." Data" !          \ store "Data" at VARIABLES[0]
+>  name @ .            \ `name` pushes `1`, `@` retrieves value at VARIABLES[]
+
+
+ARRAY, heterogeneous
+
+>  STRING VARIABLE name
+
+hmmm....
+
+Do need a way of declaring a non-string variable. Var decl needs to take
+optional parameter(s) to set type, and maybe initial value.
+
+>  0 VARIABLE $var_name    :: string
+>  1 VARIABLE $var_name    :: int
+>  2 VARIABLE $var_name    :: index array
+>  3 VARIABLE $var_name    :: assoc. array
+
+Maybe a higher bit for if a default value is provided?
+
+>  8 VARIABLE $var_name    :: set value
+
+Example, sets string to dyn value:
+>  STR DEFAULT + VARIABLE name [ ... ]
+
+
+Leave out defaults. Make things annoying. More trouble than worth right now.
+
+Do need some way of differentiating the data type. At least for str vs. assoc.
+array vs. index arr. Can overwrite a var declared with no flags. But not between
+indexed <--> assoc.
+> VARIABLE $name >MAP
+> VARIABLE $name >LIST
+
+Requires everything to be a pointer.
+
+Get/set requires prefix word. Makes a kinda infix expression.
+> $value ! $name
+`!` calls WORD, pops name from stack, pops value, assigns to $name.
+`@` calls WORD, pushes ref'd value to stack
+
+`VARIABLE` calls `CREATE` to make a word for the var? Calling the word pushes
+its variable name to the stack.
+
+ in | VARIABLE version
+ in | version .
+out > _VAR_12
+
+ in | ." v0.0.1" version         S{ "v.0.0.1", _VAR_12 }
+ in | !                          S{ }
+
+Pops name, creates ref. Pops value, assigns to ref.
+
+Need words for array nonsense.
+   . PUSH  ::  __ref__+=( ... )
+   . POP   ::  unset '__ref__[-1]'
+   . SET   ::  __ref__[$key]=$val
+   . GET   ::  S+=( __ref__[$key] )
+
+May make my own `fetch` and `store` operators for variables. Likely just arrows.
+Frees up `@` and `!`.
+ in | VARIABLE version
+ in | ." v0.0.1" version <-
+ in | version -> .
+out > v0.0.1
+
+All in the form of:
+   $value  $variable  $operation  [$argument]
+
+ in | ." this"  array  PUSH                  array{ ..., "this" }
+ in | ." that"  array  SET   -1              array{ ..., "that" }
+ in | array GET -1 .
+out > that
+
+Variables may not be a compile word. Can maybe define like...
+
+:  variable
+   word dup
+   create-var  # VARIABLES[S[-1]]=_VAR_$(( ++_VAR_NUM )) ; declare $LATEST_VAR
+   create
+   $LATEST_VAR ,
+   ' EXIT ,
+;
+
+VARIABLE version
+   (1)   calls `WORD`, reads 'version'    S{ 'version' }
+   (2)   dups 2x                          S{ 'version', 'version' }
+   (3)   mkvar
+            LATEST_VAR="_VAR_$(( ++_VAR_NUM ))
+            declare "$LATEST_VAR"
+            VARIABLES["${S[-1]}"]="$LATEST_VAR"
+            unset 'S[-1]'
+   (4)   $LATEST_VAR                      S{ '_VAR_$n' }
+   (5)   ,                                S{}             pushes to M[]
+   (6)   ' EXIT ,                         S{}             pushes EXIT CW to M[]
+
+
+This solution is good, as it allows for using variables from the bash/conflang
+environment easily in forth. Can push vars from bash -> forth pretty easily.
+
+Might want to also have a native word for making namerefs. Can compose the
+variable word with slightly more primitive words.
+
+
+function code_NAMEREF {
+   assert_stack 1
+   _var="${S[-1]}"
+   unset 'S[-1]'
+
+   code_WORD 'no-next'
+   _ref="${S[-1]}"
+   unset 'S[-1]'
+
+   declare -n "$_ref"="$_var"
+   NEXT
+}
+def_code  '-n'  'code_NAMEREF'  $NO_FLAG
+
+ in | version -n ref
+ in | 20 word ref <-
+
+Make words for "PS1" (input prompt) and "PS2" (output prompt). Do both of them
+additionally call some format specifier? fmt-dim or something?
+
+Need some way of more easily pushing an identifier to the stack instead of
+calling WORD all the time. Pretty much all the symbols are taken.
+
+Maybe look up variables by name with `$`? Feels pretty bash-y.
